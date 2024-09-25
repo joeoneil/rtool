@@ -1,0 +1,211 @@
+WHITESPACE = _{ " " }
+
+program = { SOI ~ line* ~ EOI}
+
+expr = _{ prefix* ~ primary ~ (infix ~ prefix* ~ primary)* }
+    prefix = _{ not | neg | pos }
+        not = { "~" }
+        neg = { "-" }
+        pos = { "+" }
+    infix = _{ mul | div | mod | and | or | xor | sll | srl | sra | add | sub }
+        mul = { "*" }
+        div = { "/" }
+        mod = { "%" }
+        and = { "&" }
+        or  = { "|" }
+        xor = { "^" }
+        sll = { "<<" }
+        srl = { ">>" }
+        sra = { ">>>" }
+        add = { "+" }
+        sub = { "-" }
+    primary = _{ number_literal | register | ident | "(" ~ expr ~ ")" }
+        number_literal = { hex_literal | oct_literal | bin_literal | dec_literal } 
+            hex_literal = @{"0x" ~ (ASCII_HEX_DIGIT) ~ (ASCII_HEX_DIGIT | "_")*}
+            oct_literal = @{"0o" ~ ('0'..'7') ~ ('0'..'7' | "_")* }
+            bin_literal = @{"0b" ~ ('0'..'1') ~ ('0'..'1' | "_")* }
+            dec_literal = @{"-"? ~ ASCII_DIGIT ~ ( ASCII_DIGIT | " " )* }
+
+operand = _{ displacement | expr }
+    displacement = ${ number_literal ~ "(" ~ register ~ ")" }
+    register = @{ "$" ~ (
+        zero
+        | asm
+        | (ret ~ '0'..'1')
+        | (arg ~ '0'..'3')
+        | (tmp ~ '0'..'9')
+        | (loc ~ '0'..'7')
+        | (krn ~ '0'..'1')
+        | gp
+        | sp
+        | fp
+        | ra
+        | lit_reg
+    ) }
+        zero = _{ "zero" }
+        asm = _{ "at" }
+        ret = _{ "v" }
+        arg = _{ "a" }
+        tmp = _{ "t" }
+        loc = _{ "s" }
+        krn = _{ "k" }
+        gp = _{ "gp" }
+        sp = _{ "sp" }
+        fp = _{ "fp" }
+        ra = _{ "ra" }
+        lit_reg = @{ '0'..'9' | ('0'..'2' ~ '0'..'9') | "30" | "31" }
+
+operands = { (operand ~ separator){0,2} ~ operand? }
+
+mnemonic = { pseudo_1 | real | pseudo_2 }
+    pseudo_1 = _{
+        ^"beqz"
+        | ^"bnez"
+    }
+    pseudo_2 = _{
+        ^"li"
+        | ^"la"
+        | ^"lea"
+        | ^"move"
+        | ^"abs"
+        | ^"negu"
+        | ^"neg"
+        | ^"not"
+        | ^"remu"
+        | ^"rem"
+        | ^"rol"
+        | ^"ror"
+        | ^"mulou"
+        | ^"mulo"
+        | ^"mul"
+        | ^"seq"
+        | ^"sgeu"
+        | ^"sge"
+        | ^"sgtu"
+        | ^"sgt"
+        | ^"sleu"
+        | ^"sle"
+        | ^"sne"
+        | ^"bal"
+        | ^"bgeu"
+        | ^"bge"
+        | ^"bgtu"
+        | ^"bgt"
+        | ^"bleu"
+        | ^"ble"
+        | ^"bltu"
+        | ^"blt"
+        | ^"b"
+    }
+    real = _{ 
+        ^"jr"
+        | ^"jalr"
+        | ^"jal"
+        | ^"j"
+        | ^"beq"
+        | ^"bne"
+        | ^"blez"
+        | ^"bgtz"
+        | ^"addiu"
+        | ^"addi"
+        | ^"sltiu"
+        | ^"slti"
+        | ^"andi"
+        | ^"ori"
+        | ^"xori"
+        | ^"lui"
+        | ^"lbu"
+        | ^"lb"
+        | ^"lhu"
+        | ^"lh"
+        | ^"lwl"
+        | ^"lwr"
+        | ^"lw"
+        | ^"sb"
+        | ^"sh"
+        | ^"swl"
+        | ^"swr"
+        | ^"sw"
+        | ^"sllv"
+        | ^"srlv"
+        | ^"srav"
+        | ^"sll"
+        | ^"srl"
+        | ^"sra"
+        | ^"syscall"
+        | ^"break"
+        | ^"mfhi"
+        | ^"mthi"
+        | ^"mflo"
+        | ^"mtlo"
+        | ^"multu"
+        | ^"mult"
+        | ^"divu"
+        | ^"div"
+        | ^"addu"
+        | ^"add"
+        | ^"subu"
+        | ^"sub"
+        | ^"and"
+        | ^"or"
+        | ^"xor"
+        | ^"nor"
+        | ^"sltu"
+        | ^"slt"
+        | ^"bltzal"
+        | ^"bgezal"
+        | ^"bltz"
+        | ^"bgez"
+    }
+
+directive = { "." ~ (
+    data
+    | rdata
+    | sdata
+    | text
+    | (asciiz ~ (string_literal ~ separator)* ~ string_literal?)
+    | (ascii ~ (string_literal ~ separator)* ~ string_literal?)
+    | (byte ~ (number_literal ~ separator)* ~ number_literal?)
+    | (half ~ (number_literal ~ separator)* ~ number_literal?)
+    | (word ~ (number_literal ~ separator)* ~ number_literal?)
+    | (comm ~ ident ~ expr)
+    | (lcomm ~ ident ~ expr)
+    | (space ~ expr)
+    | (align ~ expr)
+    | (globl ~ ident)
+)}
+    data = { "data" }
+    rdata = { "rdata" }
+    sdata = { "sdata" }
+    text = { "text" }
+    ascii = { "ascii" }
+    asciiz = { "asciiz" }
+    byte = { "byte" }
+    half = { "half" }
+    word = { "word" }
+    comm = { "comm" }
+    lcomm = { "lcomm" }
+    space = { "space" }
+    align = { "align" }
+    globl = { "globl" }
+
+ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+label = ${ ident ~ ":" }
+
+comment = { "#" ~ (!("\n") ~ ANY)* }
+
+string_literal = ${ "\"" ~ string_inner ~ "\"" }
+string_inner = @{ char* }
+char = {
+    !("\"" | "\\") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
+    | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
+}
+
+separator = _{ "," }
+
+line = { (assign | comment | directive | instr | label | empty ) ~ comment? ~ "\n"? }
+    assign = { ident ~ "=" ~ ( expr | register ) }
+    empty = { "\n" }
+    instr = { label? ~ mnemonic ~ operands }
+    
