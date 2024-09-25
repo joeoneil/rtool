@@ -10,9 +10,11 @@ typedef struct RelocationEntry {
 }
 ```
 
+```
 0----+----+----+----4----+----+----+----8
 |    address (BE)   |sect|  Info (BE)   |
 +----+----+----+----+----+----+----+----+
+```
 
 sect is 1 byte wide and is the following enum
 
@@ -50,15 +52,19 @@ typedef struct ReferenceEntry {
 }
 ```
 
+```
 0----+----+----+----4----+----+----+----8----+----+----+----b
 |    address (BE)   | strtab offset (BE)| reference info    |
 +----+----+----+----+----+----+----+----+----+----+----+----+
+```
 
 reference info has the following bitfields
 
+```
 0----+----4----+----8----+----b----+---10----+---14----+---18----+---1b----+---20
 |               ix (BE)                 |res | ?? |   typ   |       sect        |
 +----+----+----+----+----+----+----+----+----+----+----+----+----+----+----+----+
+```
 
 res is reserved / ignored
 
@@ -101,9 +107,11 @@ typedef struct SymtabEntry {
     uint16_t _pad;
 }
 
+```
 0----+----+----+----4----+----+----+----8----+----+----+----b----+----+----+---10
 |       flags       |     value (BE)    |strtab offset (BE) |ofid (BE)|  pad    |
 +----+----+----+----+----+----+----+----+----+----+----+----+----+----+----+----+
+```
 
 the lowest order 4 bits of `flags` determines in which section the symbol is located
 
