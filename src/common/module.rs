@@ -8,9 +8,9 @@ use lazy_static::lazy_static;
 
 use super::{
     types::{ObjectHeader, ObjectModule},
-    SymEntry,
+    Location, RefInfo, RefUnknown, SymEntry,
 };
-use crate::common::{RefEntry, RelEntry};
+use crate::common::{RefEntry, RefType, RelEntry};
 
 lazy_static! {
     pub static ref obj: ObjectModule = ObjectModule {
@@ -161,23 +161,7 @@ impl ObjectModule {
                 .as_slice()
                 .try_into()
                 .map_err(|_| String::from("Reached end of data while parsing rel info"))?;
-            let addr = u32::from_be_bytes(rel_bytes[0..4].try_into().unwrap());
-            let sect = rel_bytes[4];
-            let rel = u32::from_le_bytes(
-                rel_bytes[5..8]
-                    .iter()
-                    .copied()
-                    .chain([0].into_iter())
-                    .collect::<Vec<_>>()
-                    .as_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            rel_info.push(RelEntry {
-                addr,
-                sect,
-                rel_info: rel,
-            })
+            rel_info.push(RelEntry::from_bytes(rel_bytes).expect("Invalid relocation entry"));
         }
 
         let mut ext_ref: Vec<RefEntry> = vec![];
@@ -190,14 +174,7 @@ impl ObjectModule {
                 .as_slice()
                 .try_into()
                 .map_err(|_| String::from("Reached end of data while parsing ref info"))?;
-            let addr = u32::from_be_bytes(ref_bytes[0..4].try_into().unwrap());
-            let str_off = u32::from_be_bytes(ref_bytes[4..8].try_into().unwrap());
-            let ref_info = u32::from_le_bytes(ref_bytes[8..12].try_into().unwrap());
-            ext_ref.push(RefEntry {
-                addr,
-                str_off,
-                ref_info,
-            })
+            ext_ref.push(RefEntry::from_bytes(ref_bytes).expect("Invalid reference entry"));
         }
 
         let mut symtab: Vec<SymEntry> = vec![];
@@ -210,6 +187,8 @@ impl ObjectModule {
                 .as_slice()
                 .try_into()
                 .map_err(|_| String::from("Reached end of data while parsing symbol table"))?;
+            symtab.push(SymEntry::from_bytes(sym_bytes).expect("Invalid symtab entry"));
+            /*
             let flags = u32::from_be_bytes(sym_bytes[0..4].try_into().unwrap());
             let val = u32::from_be_bytes(sym_bytes[4..8].try_into().unwrap());
             let str_off = u32::from_be_bytes(sym_bytes[8..12].try_into().unwrap());
@@ -220,6 +199,7 @@ impl ObjectModule {
                 str_off,
                 ofid,
             });
+            */
             /*
             println!(
                 "raw sym: {:02x}{:02x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x}",
@@ -255,7 +235,7 @@ impl ObjectModule {
             ));
         }
 
-        // mod tab
+        // TODO: mod tab
         // println!("Remaining bytes in object file: {}", bytes.count());
 
         Ok(ObjectModule {
@@ -313,17 +293,18 @@ impl ObjectModule {
                     rel.addr,
                     // Other sections cannot be relocatable (maybe?)
                     match rel.sect {
-                        0 => "TEXT",
-                        1 => "RDATA",
-                        2 => "DATA",
-                        3 => "SDATA",
-                        s => panic!("Unknown relocation section {s}"),
+                        Location::TEXT => "TEXT",
+                        Location::RDATA => "RDATA",
+                        Location::DATA => "DATA",
+                        Location::SDATA => "SDATA",
+                        s => panic!("Invalid relocation section {}", s as u8),
                     },
-                    // Other relocation types may exist
                     match rel.rel_info {
-                        3 => "WORD",
-                        4 => "JUMP",
-                        v => panic!("Unknown relocation type {v}"),
+                        RefType::IMM => "IMM",
+                        RefType::IMM2 => "IMM2",
+                        RefType::IMM3 => "IMM3",
+                        RefType::WORD => "WORD",
+                        RefType::JUMP => "JUMP",
                     }
                 );
             }
@@ -338,11 +319,25 @@ impl ObjectModule {
             for r in &self.ext_ref {
                 writeln!(
                     f,
-                    " ref: addr {:08x} sym {:?}, {:08x}",
+                    " ref: addr {:08x} sym {:?} ix {:04x} {} + {}",
                     r.addr,
                     self.get_str_entry(r.str_off as usize)
                         .expect(format!("Invalid reftab entry offset {}", r.str_off).as_str()),
-                    r.ref_info
+                    r.ref_info.ix,
+                    match r.ref_info.typ {
+                        RefType::IMM => "IMM",
+                        RefType::IMM2 => "IMM2",
+                        RefType::IMM3 => "IMM3",
+                        RefType::JUMP => "JUMP",
+                        RefType::WORD => "WORD",
+                    },
+                    match r.ref_info.sect {
+                        Location::TEXT => "TEXT",
+                        Location::DATA => "DATA",
+                        Location::RDATA => "RDATA",
+                        Location::SDATA => "SDATA",
+                        _ => unreachable!(),
+                    }
                 )?;
             }
         }
@@ -408,40 +403,181 @@ impl Display for ObjectModule {
     }
 }
 
-impl SymEntry {
-    fn to_bytes(self) -> [u8; 16] {
-        let mut buf = [0; 16];
-        let mut vec = vec![];
-        vec.extend_from_slice(&self.flags.to_be_bytes());
-        vec.extend_from_slice(&self.val.to_be_bytes());
-        vec.extend_from_slice(&self.str_off.to_be_bytes());
-        vec.extend_from_slice(&self.ofid.to_be_bytes());
-        vec.extend_from_slice(&[0, 0]);
-        buf.copy_from_slice(vec.as_slice());
+impl RelEntry {
+    pub fn to_bytes(&self) -> [u8; 8] {
+        let mut buf = [0; 8];
+
+        let a_bytes = self.addr.to_be_bytes();
+        for i in 0..4 {
+            buf[i] = a_bytes[i];
+        }
+        buf[4] = self.sect as u8;
+        buf[7] = self.rel_info as u8;
+
         buf
     }
-}
 
-impl RelEntry {
-    fn to_bytes(self) -> [u8; 8] {
-        let mut buf = [0; 8];
-        let mut vec = vec![];
-        vec.extend_from_slice(&self.addr.to_be_bytes());
-        vec.extend_from_slice(&((self.rel_info << 8) & 0xFFFFFF00).to_le_bytes());
-        vec[4] = self.sect;
-        buf.copy_from_slice(vec.as_slice());
-        buf
+    pub fn from_bytes(bytes: [u8; 8]) -> Option<Self> {
+        let addr = u32::from_be_bytes(bytes[0..4].try_into().unwrap());
+        let sect = bytes[4].try_into().ok()?;
+        let rel_info = bytes[7].try_into().ok()?;
+
+        Some(Self {
+            addr,
+            sect,
+            rel_info,
+        })
     }
 }
 
 impl RefEntry {
-    fn to_bytes(self) -> [u8; 12] {
+    pub fn to_bytes(&self) -> [u8; 12] {
         let mut buf = [0; 12];
-        let mut vec = vec![];
-        vec.extend_from_slice(&self.addr.to_be_bytes());
-        vec.extend_from_slice(&self.str_off.to_be_bytes());
-        vec.extend_from_slice(&self.ref_info.to_le_bytes());
-        buf.copy_from_slice(vec.as_slice());
+
+        let a_bytes = self.addr.to_be_bytes();
+        for i in 0..4 {
+            buf[i] = a_bytes[i];
+        }
+
+        let off_bytes = self.str_off.to_be_bytes();
+        for i in 0..4 {
+            buf[i + 4] = off_bytes[i];
+        }
+
+        let ix_bytes = self.ref_info.ix.to_be_bytes();
+        for i in 0..2 {
+            buf[i + 8] = ix_bytes[i];
+        }
+
+        buf[10] = ((self.ref_info.unknown as u8) << 4) | (self.ref_info.typ as u8);
+        buf[11] = self.ref_info.sect as u8;
+
         buf
+    }
+
+    pub fn from_bytes(bytes: [u8; 12]) -> Option<Self> {
+        let addr = u32::from_be_bytes(bytes[0..4].try_into().unwrap());
+        let str_off = u32::from_be_bytes(bytes[4..8].try_into().unwrap());
+        let ix = u16::from_be_bytes(bytes[8..10].try_into().unwrap());
+        let unknown = RefUnknown::try_from(bytes[10] >> 4).ok()?;
+        let typ = RefType::try_from(bytes[10] & 0x0F).ok()?;
+        let sect = Location::try_from(bytes[11]).ok()?;
+
+        Some(Self {
+            addr,
+            str_off,
+            ref_info: RefInfo {
+                ix,
+                unknown,
+                typ,
+                sect,
+            },
+        })
+    }
+}
+
+impl SymEntry {
+    pub fn to_bytes(&self) -> [u8; 16] {
+        let mut buf = [0; 16];
+
+        let f_bytes = self.flags.to_be_bytes();
+        for i in 0..4 {
+            buf[i] = f_bytes[i];
+        }
+
+        let v_bytes = self.val.to_be_bytes();
+        for i in 0..4 {
+            buf[i + 4] = v_bytes[i];
+        }
+
+        let s_bytes = self.str_off.to_be_bytes();
+        for i in 0..4 {
+            buf[i + 8] = s_bytes[i];
+        }
+
+        let o_bytes = self.ofid.to_be_bytes();
+        for i in 0..2 {
+            buf[i + 12] = o_bytes[i];
+        }
+
+        buf
+    }
+
+    pub fn from_bytes(bytes: [u8; 16]) -> Option<Self> {
+        let flags = u32::from_be_bytes(bytes[0..4].try_into().unwrap());
+        let val = u32::from_be_bytes(bytes[4..8].try_into().unwrap());
+        let str_off = u32::from_be_bytes(bytes[8..12].try_into().unwrap());
+        let ofid = u16::from_be_bytes(bytes[12..14].try_into().unwrap());
+
+        Some(Self {
+            flags,
+            val,
+            str_off,
+            ofid,
+        })
+    }
+
+    #[inline]
+    pub fn has_flags(&self, flags: u32) -> bool {
+        self.flags & flags == flags
+    }
+
+    #[inline]
+    pub fn has_any_flag(&self, flags: u32) -> bool {
+        self.flags & flags > 0
+    }
+}
+
+impl TryFrom<u8> for Location {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::TEXT),
+            1 => Ok(Self::RDATA),
+            2 => Ok(Self::DATA),
+            3 => Ok(Self::SDATA),
+            4 => Ok(Self::SBSS),
+            5 => Ok(Self::BSS),
+            6 => Ok(Self::REL),
+            7 => Ok(Self::REF),
+            8 => Ok(Self::SYM),
+            9 => Ok(Self::STR),
+            10 => Ok(Self::HEAP),
+            11 => Ok(Self::STACK),
+            12 => Ok(Self::ABS),
+            13 => Ok(Self::EXT),
+            14 => Ok(Self::UNK),
+            15 => Ok(Self::NONE),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<u8> for RefUnknown {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::PLUS),
+            1 => Ok(Self::EQ),
+            2 => Ok(Self::MINUS),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<u8> for RefType {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::IMM),
+            2 => Ok(Self::IMM2),
+            3 => Ok(Self::WORD),
+            4 => Ok(Self::JUMP),
+            5 => Ok(Self::IMM3),
+            _ => Err(()),
+        }
     }
 }

@@ -62,11 +62,9 @@ reference info has the following bitfields
 
 ```
 0----+----4----+----8----+----b----+---10----+---14----+---18----+---1b----+---20
-|               ix (BE)                 |res | ?? |   typ   |       sect        |
+|               ix (BE)                 |    ??   |   typ   |       sect        |
 +----+----+----+----+----+----+----+----+----+----+----+----+----+----+----+----+
 ```
-
-res is reserved / ignored
 
 ?? is some kind of enum, with the following values
 
