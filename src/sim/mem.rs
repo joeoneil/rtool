@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 /// struct the manages the virtual address space the running program is in.
 /// Controls reads and writes to and from memory as well as allocating pages
+#[derive(Clone)]
 pub struct Memory {
     /// Page table mapping virtual ids (20 most significant bits of ptr) to
     /// real ids.
@@ -23,6 +24,7 @@ pub struct Memory {
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PageID(pub u32);
 
+#[derive(Clone, Copy)]
 pub struct Page(pub [u8; PAGE_SIZE as usize]);
 
 impl Memory {
@@ -245,7 +247,7 @@ impl Memory {
         self.pages.get_mut(r_id.0 as usize)
     }
 
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             table: HashMap::new(),
             write: HashMap::new(),

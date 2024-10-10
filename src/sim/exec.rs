@@ -11,12 +11,14 @@ use crate::{
     sim::{Register, DATA_START, STACK_START},
 };
 
+#[derive(Clone, Copy)]
 struct ExecCtx {
     reg: [u32; 32],
     pc: u32,
     hi: u32,
     lo: u32,
 }
+
 pub struct Exec {
     ctx: ExecCtx,
     mem: Memory,
@@ -28,6 +30,7 @@ pub struct Exec {
     next_fd: u32,
 }
 
+#[derive(Clone)]
 enum Exception {
     Syscall(u32),
     Break(u32),
@@ -38,8 +41,24 @@ enum Exception {
     Timer,
 }
 
+impl Clone for Exec {
+    fn clone(&self) -> Self {
+        Exec {
+            ctx: self.ctx,
+            mem: self.mem.clone(),
+            heap_start: self.heap_start,
+            heap_size: self.heap_size,
+            heap_next_page: self.heap_next_page,
+            exn: self.exn.clone(),
+            files: HashMap::new(),
+            next_fd: 33,
+        }
+    }
+}
+
 impl Exec {
     fn exec_instruction(&mut self, i: Instruction) {
+        use crate::common::instruction::opcodes::*;
         match i {
             Instruction::R {
                 rs,
@@ -48,68 +67,52 @@ impl Exec {
                 shamt,
                 funct,
             } => match funct {
-                // sll
-                0o00 => self.ctx.reg[rd as usize] = self.ctx.reg[rt as usize] << shamt,
-                // srl
-                0o02 => self.ctx.reg[rd as usize] = self.ctx.reg[rt as usize] >> shamt,
-                // sra
-                0o03 => {
+                FUNCT_SLL => self.ctx.reg[rd as usize] = self.ctx.reg[rt as usize] << shamt,
+                FUNCT_SRL => self.ctx.reg[rd as usize] = self.ctx.reg[rt as usize] >> shamt,
+                FUNCT_SRA => {
                     self.ctx.reg[rd as usize] = (self.ctx.reg[rt as usize] as i32 >> shamt) as u32
                 }
-                // sllv
-                0o04 => {
+                FUNCT_SLLV => {
                     self.ctx.reg[rd as usize] =
                         self.ctx.reg[rt as usize] << (self.ctx.reg[rs as usize] & 0x1F)
                 }
-                // srlv
-                0o06 => {
+                FUNCT_SRLV => {
                     self.ctx.reg[rd as usize] =
                         self.ctx.reg[rt as usize] >> (self.ctx.reg[rs as usize] & 0x1F)
                 }
-                // srav
-                0o07 => {
+                FUNCT_SRAV => {
                     self.ctx.reg[rd as usize] = (self.ctx.reg[rt as usize] as i32
                         >> (self.ctx.reg[rs as usize] & 0x1F))
                         as u32
                 }
-                // jr
-                0o10 => self.ctx.pc = self.ctx.reg[rs as usize],
-                // jalr
-                0o11 => {
+                FUNCT_JR => self.ctx.pc = self.ctx.reg[rs as usize],
+                FUNCT_JALR => {
                     // assembler defaults rd to $ra if not specified
+                    // but the register to link is always specified in the inst
                     self.ctx.reg[rd as usize] = self.ctx.pc;
                     self.ctx.pc = self.ctx.reg[rs as usize];
                 }
-                // syscall
-                0o14 => self.raise_exn(Exception::Syscall(0)),
-                // break
-                0o15 => self.raise_exn(Exception::Syscall(0)),
-                // mfhi
-                0o20 => self.ctx.reg[rd as usize] = self.ctx.hi,
-                // mthi
-                0o21 => self.ctx.hi = self.ctx.reg[rs as usize],
-                // mflo
-                0o22 => self.ctx.reg[rd as usize] = self.ctx.lo,
-                // mtlo
-                0o23 => self.ctx.lo = self.ctx.reg[rs as usize],
-                // mult
-                0o30 => {
+                FUNCT_SYSCALL => self.raise_exn(Exception::Syscall(0)),
+                FUNCT_BREAK => self.raise_exn(Exception::Syscall(0)),
+                FUNCT_MFHI => self.ctx.reg[rd as usize] = self.ctx.hi,
+                FUNCT_MTHI => self.ctx.hi = self.ctx.reg[rs as usize],
+                FUNCT_MFLO => self.ctx.reg[rd as usize] = self.ctx.lo,
+                FUNCT_MTLO => self.ctx.lo = self.ctx.reg[rs as usize],
+                FUNCT_MULT => {
                     let a = self.ctx.reg[rs as usize] as i32 as i64;
                     let b = self.ctx.reg[rt as usize] as i32 as i64;
                     let res = (a * b) as u64;
                     self.ctx.hi = (res >> 32) as u32;
                     self.ctx.lo = (res & 0x0000FFFF) as u32
                 }
-                // multu
-                0o31 => {
+                FUNCT_MULTU => {
                     let a = self.ctx.reg[rs as usize] as u64;
                     let b = self.ctx.reg[rt as usize] as u64;
                     let res = (a * b);
                     self.ctx.hi = (res >> 32) as u32;
                     self.ctx.lo = (res & 0x0000FFFF) as u32;
                 }
-                // div
-                0o32 => {
+                FUNCT_DIV => {
                     let a = self.ctx.reg[rs as usize] as i32;
                     let b = self.ctx.reg[rt as usize] as i32;
                     if b == 0 {
@@ -119,8 +122,7 @@ impl Exec {
                         self.ctx.hi = (a % b) as u32;
                     }
                 }
-                // divu
-                0o33 => {
+                FUNCT_DIVU => {
                     let a = self.ctx.reg[rs as usize];
                     let b = self.ctx.reg[rt as usize];
                     if b == 0 {
@@ -130,8 +132,7 @@ impl Exec {
                         self.ctx.hi = (a % b);
                     }
                 }
-                // add
-                0o40 => {
+                FUNCT_ADD => {
                     match ((self.ctx.reg[rs as usize] as i32)
                         .checked_add(self.ctx.reg[rt as usize] as i32))
                     {
@@ -139,45 +140,37 @@ impl Exec {
                         _ => self.raise_exn(Exception::Overflow),
                     }
                 }
-                // addu
-                0o41 => {
+                FUNCT_ADDU => {
                     self.ctx.reg[rd as usize] =
                         self.ctx.reg[rs as usize].wrapping_add(self.ctx.reg[rt as usize])
                 }
-                // sub
-                0o42 => match (self.ctx.reg[rs as usize] as i32)
+                FUNCT_SUB => match (self.ctx.reg[rs as usize] as i32)
                     .checked_sub(self.ctx.reg[rt as usize] as i32)
                 {
                     Some(v) => self.ctx.reg[rd as usize] = v as u32,
                     _ => self.raise_exn(Exception::Overflow),
                 },
-                // subu
-                0o43 => {
+                FUNCT_SUBU => {
                     self.ctx.reg[rd as usize] =
                         self.ctx.reg[rs as usize].wrapping_sub(self.ctx.reg[rt as usize])
                 }
-                // and
-                0o44 => {
+                FUNCT_AND => {
                     self.ctx.reg[rd as usize] =
                         self.ctx.reg[rs as usize] & self.ctx.reg[rt as usize]
                 }
-                // or
-                0o45 => {
+                FUNCT_OR => {
                     self.ctx.reg[rd as usize] =
                         self.ctx.reg[rs as usize] | self.ctx.reg[rt as usize]
                 }
-                // xor
-                0o46 => {
+                FUNCT_XOR => {
                     self.ctx.reg[rd as usize] =
                         self.ctx.reg[rs as usize] ^ self.ctx.reg[rt as usize]
                 }
-                // nor
-                0x47 => {
+                FUNCT_NOR => {
                     self.ctx.reg[rd as usize] =
                         !(self.ctx.reg[rs as usize] | self.ctx.reg[rt as usize])
                 }
-                // slt
-                0o52 => {
+                FUNCT_SLT => {
                     self.ctx.reg[rd as usize] =
                         if (self.ctx.reg[rs as usize] as i32) < (self.ctx.reg[rt as usize] as i32) {
                             1
@@ -185,8 +178,7 @@ impl Exec {
                             0
                         }
                 }
-                // sltu
-                0o53 => {
+                FUNCT_SLTU => {
                     self.ctx.reg[rd as usize] =
                         if self.ctx.reg[rs as usize] < self.ctx.reg[rt as usize] {
                             1
@@ -196,198 +188,167 @@ impl Exec {
                 }
                 _ => unreachable!(),
             },
-            Instruction::I { op, rs, rt, imm } => {
-                match op {
-                    // BCOND special case
-                    0o01 => match rt {
-                        // bltz
-                        0o00 => {
-                            if (self.ctx.reg[rs as usize] as i32) < 0 {
-                                self.ctx.pc =
-                                    (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
-                            }
-                        }
-                        // bgez
-                        0o01 => {
-                            if (self.ctx.reg[rs as usize] as i32) >= 0 {
-                                self.ctx.pc =
-                                    (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
-                            }
-                        }
-                        // bltzal
-                        0o20 => {
-                            if (self.ctx.reg[rs as usize] as i32) < 0 {
-                                self.ctx.reg[31] = self.ctx.pc;
-                                self.ctx.pc =
-                                    (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
-                            }
-                        }
-                        // bgezal
-                        0o21 => {
-                            if (self.ctx.reg[rs as usize] as i32) >= 0 {
-                                self.ctx.reg[31] = self.ctx.pc;
-                                self.ctx.pc =
-                                    (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
-                            }
-                        }
-                        _ => unreachable!(),
-                    },
-                    // beq
-                    0o04 => {
-                        if (self.ctx.reg[rs as usize] == self.ctx.reg[rt as usize]) {
+            Instruction::I { op, rs, rt, imm } => match op {
+                OP_BCOND => match rt {
+                    BCOND_BLTZ => {
+                        if (self.ctx.reg[rs as usize] as i32) < 0 {
                             self.ctx.pc = (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
                         }
                     }
-                    // bne
-                    0o05 => {
-                        if (self.ctx.reg[rs as usize] != self.ctx.reg[rt as usize]) {
+                    BCOND_BGEZ => {
+                        if (self.ctx.reg[rs as usize] as i32) >= 0 {
                             self.ctx.pc = (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
                         }
                     }
-                    // blez
-                    0o06 => {
-                        if ((self.ctx.reg[rs as usize] as i32) <= 0) {
+                    BCOND_BLTZAL => {
+                        if (self.ctx.reg[rs as usize] as i32) < 0 {
+                            self.ctx.reg[31] = self.ctx.pc;
                             self.ctx.pc = (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
                         }
                     }
-                    // bgtz
-                    0o07 => {
-                        if (self.ctx.reg[rs as usize] > 0) {
+                    BCOND_BGEZAL => {
+                        if (self.ctx.reg[rs as usize] as i32) >= 0 {
+                            self.ctx.reg[31] = self.ctx.pc;
                             self.ctx.pc = (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
                         }
                     }
-                    // addi
-                    0o10 => {
-                        match (self.ctx.reg[rs as usize] as i32).checked_add(imm as i16 as i32) {
-                            Some(v) => self.ctx.reg[rt as usize] = v as u32,
-                            _ => self.raise_exn(Exception::Overflow),
-                        }
+                    _ => unreachable!(),
+                },
+                OP_BEQ => {
+                    if (self.ctx.reg[rs as usize] == self.ctx.reg[rt as usize]) {
+                        self.ctx.pc = (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
                     }
-                    // addiu
-                    0o11 => {
-                        self.ctx.reg[rt as usize] =
-                            self.ctx.reg[rs as usize].wrapping_add(imm as u32)
+                }
+                OP_BNE => {
+                    if (self.ctx.reg[rs as usize] != self.ctx.reg[rt as usize]) {
+                        self.ctx.pc = (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
                     }
-                    // slti
-                    0o12 => {
-                        self.ctx.reg[rt as usize] =
-                            if (self.ctx.reg[rs as usize] as i32) < (imm as i16 as i32) {
-                                1
-                            } else {
-                                0
-                            }
+                }
+                OP_BLEZ => {
+                    if ((self.ctx.reg[rs as usize] as i32) <= 0) {
+                        self.ctx.pc = (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
                     }
-                    // sltiu
-                    0o13 => {
-                        self.ctx.reg[rt as usize] = if self.ctx.reg[rs as usize] < imm as u32 {
+                }
+                OP_BGTZ => {
+                    if (self.ctx.reg[rs as usize] > 0) {
+                        self.ctx.pc = (self.ctx.pc as i32 + ((imm as i16 as i32) << 2)) as u32
+                    }
+                }
+                OP_ADDI => {
+                    match (self.ctx.reg[rs as usize] as i32).checked_add(imm as i16 as i32) {
+                        Some(v) => self.ctx.reg[rt as usize] = v as u32,
+                        _ => self.raise_exn(Exception::Overflow),
+                    }
+                }
+                OP_ADDIU => {
+                    self.ctx.reg[rt as usize] =
+                        self.ctx.reg[rs as usize].wrapping_add(imm as i16 as u32)
+                }
+                OP_SLTI => {
+                    self.ctx.reg[rt as usize] =
+                        if (self.ctx.reg[rs as usize] as i32) < (imm as i16 as i32) {
                             1
                         } else {
                             0
                         }
-                    }
-                    // andi
-                    0o14 => self.ctx.reg[rt as usize] = self.ctx.reg[rs as usize] & (imm as u32),
-                    // ori
-                    0o15 => self.ctx.reg[rt as usize] = self.ctx.reg[rs as usize] | (imm as u32),
-                    // xori
-                    0o16 => self.ctx.reg[rt as usize] = self.ctx.reg[rs as usize] ^ (imm as u32),
-                    // lui
-                    0o17 => self.ctx.reg[rt as usize] = (imm as u32) << 16,
-                    // lb
-                    0o40 => {
-                        let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
-                        match self.mem.read_byte(a) {
-                            Ok(v) => self.ctx.reg[rt as usize] = v as i8 as u32,
-                            Err(e) => self.raise_exn(Exception::Memory(e)),
-                        }
-                    }
-                    // lh
-                    0o41 => {
-                        let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
-                        match self.mem.read_half(a) {
-                            Ok(v) => self.ctx.reg[rt as usize] = v as i16 as u32,
-                            Err(e) => self.raise_exn(Exception::Memory(e)),
-                        }
-                    }
-                    // lwl
-                    0o42 => {
-                        todo!()
-                    }
-                    // lw
-                    0o43 => {
-                        let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
-                        match self.mem.read_word(a) {
-                            Ok(v) => self.ctx.reg[rt as usize] = v,
-                            Err(e) => self.raise_exn(Exception::Memory(e)),
-                        }
-                    }
-                    // lbu
-                    0o44 => {
-                        let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
-                        match self.mem.read_byte(a) {
-                            Ok(v) => self.ctx.reg[rt as usize] = v as u32,
-                            Err(e) => self.raise_exn(Exception::Memory(e)),
-                        }
-                    }
-                    // lhu
-                    0o45 => {
-                        let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
-                        match self.mem.read_half(a) {
-                            Ok(v) => self.ctx.reg[rt as usize] = v as u32,
-                            Err(e) => self.raise_exn(Exception::Memory(e)),
-                        }
-                    }
-                    // lwr
-                    0o46 => {
-                        todo!()
-                    }
-                    // sb
-                    0o50 => {
-                        let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
-                        match self.mem.write_byte(a, self.ctx.reg[rt as usize] as u8) {
-                            Ok(()) => {}
-                            Err(e) => self.raise_exn(Exception::Memory(e)),
-                        }
-                    }
-                    // sh
-                    0o51 => {
-                        let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
-                        match self.mem.write_half(a, self.ctx.reg[rt as usize] as u16) {
-                            Ok(()) => {}
-                            Err(e) => self.raise_exn(Exception::Memory(e)),
-                        }
-                    }
-                    // swl
-                    0o52 => {
-                        todo!()
-                    }
-                    // sw
-                    0o53 => {
-                        let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
-                        match self.mem.write_word(a, self.ctx.reg[rt as usize]) {
-                            Ok(()) => {}
-                            Err(e) => self.raise_exn(Exception::Memory(e)),
-                        }
-                    }
-                    // swr
-                    0o56 => {
-                        todo!()
-                    }
-                    0o20..=0o23 => {
-                        panic!("Unimplemented coprocessor instruction")
-                    }
-                    0o60..=0o63 => {
-                        panic!("Unimplemented load word from coprocessor instruction")
-                    }
-                    0o70..=0o73 => {
-                        panic!("Unimplemented store word to coprocessor instruction")
-                    }
-                    _ => unreachable!(),
                 }
-            }
+                OP_SLTIU => {
+                    self.ctx.reg[rt as usize] =
+                        // need to compare unsigned (reg) against signed (imm)
+                        // if (unsigned) < (negative) is always false, so
+                        // false if high order bit of immediate is set.
+                        if !((imm & 0x8000) > 0) && self.ctx.reg[rs as usize] < (imm as u32) {
+                            1
+                        } else {
+                            0
+                        }
+                }
+                OP_ANDI => self.ctx.reg[rt as usize] = self.ctx.reg[rs as usize] & (imm as u32),
+                OP_ORI => self.ctx.reg[rt as usize] = self.ctx.reg[rs as usize] | (imm as u32),
+                OP_XORI => self.ctx.reg[rt as usize] = self.ctx.reg[rs as usize] ^ (imm as u32),
+                OP_LUI => self.ctx.reg[rt as usize] = (imm as u32) << 16,
+                OP_LB => {
+                    let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
+                    match self.mem.read_byte(a) {
+                        Ok(v) => self.ctx.reg[rt as usize] = v as i8 as u32,
+                        Err(e) => self.raise_exn(Exception::Memory(e)),
+                    }
+                }
+                OP_LH => {
+                    let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
+                    match self.mem.read_half(a) {
+                        Ok(v) => self.ctx.reg[rt as usize] = v as i16 as u32,
+                        Err(e) => self.raise_exn(Exception::Memory(e)),
+                    }
+                }
+                OP_LWL => {
+                    todo!()
+                }
+                OP_LW => {
+                    let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
+                    match self.mem.read_word(a) {
+                        Ok(v) => self.ctx.reg[rt as usize] = v,
+                        Err(e) => self.raise_exn(Exception::Memory(e)),
+                    }
+                }
+                OP_LBU => {
+                    let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
+                    match self.mem.read_byte(a) {
+                        Ok(v) => self.ctx.reg[rt as usize] = v as u32,
+                        Err(e) => self.raise_exn(Exception::Memory(e)),
+                    }
+                }
+                OP_LHU => {
+                    let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
+                    match self.mem.read_half(a) {
+                        Ok(v) => self.ctx.reg[rt as usize] = v as u32,
+                        Err(e) => self.raise_exn(Exception::Memory(e)),
+                    }
+                }
+                OP_LWR => {
+                    todo!()
+                }
+                OP_SB => {
+                    let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
+                    match self.mem.write_byte(a, self.ctx.reg[rt as usize] as u8) {
+                        Ok(()) => {}
+                        Err(e) => self.raise_exn(Exception::Memory(e)),
+                    }
+                }
+                OP_SH => {
+                    let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
+                    match self.mem.write_half(a, self.ctx.reg[rt as usize] as u16) {
+                        Ok(()) => {}
+                        Err(e) => self.raise_exn(Exception::Memory(e)),
+                    }
+                }
+                OP_SWL => {
+                    todo!()
+                }
+                OP_SW => {
+                    let a = (self.ctx.reg[rs as usize] as i32 + (imm as i16 as i32)) as u32;
+                    match self.mem.write_word(a, self.ctx.reg[rt as usize]) {
+                        Ok(()) => {}
+                        Err(e) => self.raise_exn(Exception::Memory(e)),
+                    }
+                }
+                OP_SWR => {
+                    todo!()
+                }
+                0o20..=0o23 => {
+                    panic!("Unimplemented coprocessor instruction")
+                }
+                0o60..=0o63 => {
+                    panic!("Unimplemented load word from coprocessor instruction")
+                }
+                0o70..=0o73 => {
+                    panic!("Unimplemented store word to coprocessor instruction")
+                }
+                _ => unreachable!(),
+            },
             Instruction::J { op, imm } => match op {
-                0o02 => self.ctx.pc = ((self.ctx.pc & 0xF0000000) | (imm << 2)) - 4,
-                0o03 => {
+                OP_J => self.ctx.pc = ((self.ctx.pc & 0xF0000000) | (imm << 2)) - 4,
+                OP_JAL => {
                     self.ctx.reg[31] = self.ctx.pc;
                     self.ctx.pc = (self.ctx.pc & 0xF0000000 | (imm << 2)) - 4
                 }
@@ -613,6 +574,24 @@ impl Exec {
             addr += 1;
         }
         Ok(String::from_utf8_lossy(bytes.as_slice()).into())
+    }
+
+    pub(super) fn new_empty() -> Self {
+        Self {
+            ctx: ExecCtx {
+                reg: [0; 32],
+                pc: 0,
+                hi: 0,
+                lo: 0,
+            },
+            mem: Memory::new(),
+            exn: None,
+            files: HashMap::new(),
+            next_fd: 3,
+            heap_next_page: 0,
+            heap_size: 0,
+            heap_start: 0,
+        }
     }
 
     pub fn new(module: ObjectModule) -> Option<Self> {

@@ -5,6 +5,71 @@ use super::{
     types::{Error, Instruction},
 };
 
+pub mod opcodes {
+    pub const FUNCT_SLL: u8 = 0o00;
+    pub const FUNCT_SRL: u8 = 0o02;
+    pub const FUNCT_SRA: u8 = 0o03;
+    pub const FUNCT_SLLV: u8 = 0o04;
+    pub const FUNCT_SRLV: u8 = 0o06;
+    pub const FUNCT_SRAV: u8 = 0o07;
+    pub const FUNCT_JR: u8 = 0o10;
+    pub const FUNCT_JALR: u8 = 0o11;
+    pub const FUNCT_SYSCALL: u8 = 0o14;
+    pub const FUNCT_BREAK: u8 = 0o15;
+    pub const FUNCT_MFHI: u8 = 0o20;
+    pub const FUNCT_MTHI: u8 = 0o21;
+    pub const FUNCT_MFLO: u8 = 0o22;
+    pub const FUNCT_MTLO: u8 = 0o23;
+    pub const FUNCT_MULT: u8 = 0o30;
+    pub const FUNCT_MULTU: u8 = 0o31;
+    pub const FUNCT_DIV: u8 = 0o32;
+    pub const FUNCT_DIVU: u8 = 0o33;
+    pub const FUNCT_ADD: u8 = 0o40;
+    pub const FUNCT_ADDU: u8 = 0o41;
+    pub const FUNCT_SUB: u8 = 0o42;
+    pub const FUNCT_SUBU: u8 = 0o43;
+    pub const FUNCT_AND: u8 = 0o44;
+    pub const FUNCT_OR: u8 = 0o45;
+    pub const FUNCT_XOR: u8 = 0o46;
+    pub const FUNCT_NOR: u8 = 0o47;
+    pub const FUNCT_SLT: u8 = 0o52;
+    pub const FUNCT_SLTU: u8 = 0o53;
+
+    pub const OP_FUNCT: u8 = 0o00;
+    pub const OP_BCOND: u8 = 0o01;
+    pub const OP_J: u8 = 0o02;
+    pub const OP_JAL: u8 = 0o03;
+    pub const OP_BEQ: u8 = 0o04;
+    pub const OP_BNE: u8 = 0o05;
+    pub const OP_BLEZ: u8 = 0o06;
+    pub const OP_BGTZ: u8 = 0o07;
+    pub const OP_ADDI: u8 = 0o10;
+    pub const OP_ADDIU: u8 = 0o11;
+    pub const OP_SLTI: u8 = 0o12;
+    pub const OP_SLTIU: u8 = 0o13;
+    pub const OP_ANDI: u8 = 0o14;
+    pub const OP_ORI: u8 = 0o15;
+    pub const OP_XORI: u8 = 0o16;
+    pub const OP_LUI: u8 = 0o17;
+    pub const OP_LB: u8 = 0o40;
+    pub const OP_LH: u8 = 0o41;
+    pub const OP_LWL: u8 = 0o42;
+    pub const OP_LW: u8 = 0o43;
+    pub const OP_LBU: u8 = 0o44;
+    pub const OP_LHU: u8 = 0o45;
+    pub const OP_LWR: u8 = 0o46;
+    pub const OP_SB: u8 = 0o50;
+    pub const OP_SH: u8 = 0o51;
+    pub const OP_SWL: u8 = 0o52;
+    pub const OP_SW: u8 = 0o53;
+    pub const OP_SWR: u8 = 0o56;
+
+    pub const BCOND_BLTZ: u8 = 0o00;
+    pub const BCOND_BGEZ: u8 = 0o01;
+    pub const BCOND_BLTZAL: u8 = 0o20;
+    pub const BCOND_BGEZAL: u8 = 0o21;
+}
+
 /// Extracts a bitfield from a 32-bit number, idx 0 is the highest order bit.
 /// idx 31 is the lowest order bit.
 const fn extract_bits(val: u32, idx: u8, len: u8) -> u32 {
@@ -104,47 +169,52 @@ impl From<Instruction> for u32 {
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use opcodes::*;
         match self {
             Instruction::J { op, imm } => write!(
                 f,
                 "{} 0x{:08x}",
-                match op {
-                    0o02 => "j",
-                    0o03 => "jal",
+                match *op {
+                    OP_J => "j",
+                    OP_JAL => "jal",
                     _ => unreachable!(),
                 },
                 imm << 2
             ),
-            Instruction::I { op, rs, rt, imm } => match op {
-                0o17 => write!(f, "lui ${}, 0x{:04x}", register_name(*rt), imm),
+            Instruction::I { op, rs, rt, imm } => match *op {
+                OP_LUI => write!(f, "lui ${}, 0x{:04x}", register_name(*rt), imm),
                 _ => write!(
                     f,
                     "{} ${}, ${}, 0x{:04x}",
-                    match op {
-                        0o01 => "bcond",
-                        0o04 => "beq",
-                        0o05 => "bne",
-                        0o06 => "blez",
-                        0o07 => "bgtz",
-                        0o10 => "addi",
-                        0o11 => "addiu",
-                        0o12 => "slti",
-                        0o13 => "sltiu",
-                        0o14 => "andi",
-                        0o15 => "ori",
-                        0o16 => "xori",
-                        0o40 => "lb",
-                        0o41 => "lh",
-                        0o42 => "lwl",
-                        0o43 => "lw",
-                        0o44 => "lbu",
-                        0o45 => "lhu",
-                        0o46 => "lwr",
-                        0o50 => "sb",
-                        0o51 => "sh",
-                        0o52 => "swl",
-                        0o53 => "sw",
-                        0o56 => "swr",
+                    match *op {
+                        // TODO: reformat this so that bcond is represented
+                        // correctly. the `rt` field indicates which condition
+                        // it being used, and only 2 operands are relevant
+                        // visible
+                        OP_BCOND => "bcond",
+                        OP_BEQ => "beq",
+                        OP_BNE => "bne",
+                        OP_BLEZ => "blez",
+                        OP_BGTZ => "bgtz",
+                        OP_ADDI => "addi",
+                        OP_ADDIU => "addiu",
+                        OP_SLTI => "slti",
+                        OP_SLTIU => "sltiu",
+                        OP_ANDI => "andi",
+                        OP_ORI => "ori",
+                        OP_XORI => "xori",
+                        OP_LB => "lb",
+                        OP_LH => "lh",
+                        OP_LWL => "lwl",
+                        OP_LW => "lw",
+                        OP_LBU => "lbu",
+                        OP_LHU => "lhu",
+                        OP_LWR => "lwr",
+                        OP_SB => "sb",
+                        OP_SH => "sh",
+                        OP_SWL => "swl",
+                        OP_SW => "sw",
+                        OP_SWR => "swr",
                         _ => unreachable!(),
                     },
                     register_name(*rt),
@@ -158,15 +228,15 @@ impl Display for Instruction {
                 rd,
                 shamt,
                 funct,
-            } => match funct {
+            } => match *funct {
                 0o00..=0o03 => {
                     write!(
                         f,
                         "{} ${}, ${}, {}",
-                        match funct {
-                            0o00 => "sll",
-                            0o02 => "srl",
-                            0o03 => "sra",
+                        match *funct {
+                            FUNCT_SLL => "sll",
+                            FUNCT_SRL => "srl",
+                            FUNCT_SRA => "sra",
                             _ => unreachable!(),
                         },
                         register_name(*rd),
@@ -174,22 +244,22 @@ impl Display for Instruction {
                         shamt
                     )
                 }
-                0o10 => write!(f, "jr ${}", register_name(*rs)),
-                0o11 => write!(f, "jalr ${}, ${}", register_name(*rs), register_name(*rd)),
-                0o14 => write!(f, "syscall"),
-                0o15 => write!(f, "break"),
-                0o20 => write!(f, "mfhi ${}", register_name(*rd)),
-                0o22 => write!(f, "mflo ${}", register_name(*rd)),
-                0o21 => write!(f, "mthi ${}", register_name(*rs)),
-                0o23 => write!(f, "mtlo ${}", register_name(*rs)),
+                FUNCT_JR => write!(f, "jr ${}", register_name(*rs)),
+                FUNCT_JALR => write!(f, "jalr ${}, ${}", register_name(*rs), register_name(*rd)),
+                FUNCT_SYSCALL => write!(f, "syscall"),
+                FUNCT_BREAK => write!(f, "break"),
+                FUNCT_MFHI => write!(f, "mfhi ${}", register_name(*rd)),
+                FUNCT_MFLO => write!(f, "mflo ${}", register_name(*rd)),
+                FUNCT_MTHI => write!(f, "mthi ${}", register_name(*rs)),
+                FUNCT_MTLO => write!(f, "mtlo ${}", register_name(*rs)),
                 0o30..=0o33 => write!(
                     f,
                     "{} ${}, ${}",
-                    match funct {
-                        0o30 => "mult",
-                        0o31 => "multu",
-                        0o32 => "div",
-                        0o33 => "divu",
+                    match *funct {
+                        FUNCT_MULT => "mult",
+                        FUNCT_MULTU => "multu",
+                        FUNCT_DIV => "div",
+                        FUNCT_DIVU => "divu",
                         _ => unreachable!(),
                     },
                     register_name(*rs),
@@ -198,17 +268,17 @@ impl Display for Instruction {
                 _ => write!(
                     f,
                     "{} ${}, ${}, ${}",
-                    match funct {
-                        0o40 => "add",
-                        0o41 => "addu",
-                        0o42 => "sub",
-                        0o43 => "subu",
-                        0o44 => "and",
-                        0o45 => "or",
-                        0o46 => "xor",
-                        0o47 => "nor",
-                        0o52 => "slt",
-                        0o53 => "sltu",
+                    match *funct {
+                        FUNCT_ADD => "add",
+                        FUNCT_ADDU => "addu",
+                        FUNCT_SUB => "sub",
+                        FUNCT_SUBU => "subu",
+                        FUNCT_AND => "and",
+                        FUNCT_OR => "or",
+                        FUNCT_XOR => "xor",
+                        FUNCT_NOR => "nor",
+                        FUNCT_SLT => "slt",
+                        FUNCT_SLTU => "sltu",
                         _ => unreachable!(),
                     },
                     register_name(*rd),
