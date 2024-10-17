@@ -88,7 +88,7 @@ pub struct SymEntry {
 }
 
 pub const SYM_FORW: u32 = 0x0000_0010;
-pub const SYM_RELOC: u32 = 0x0000_0020;
+pub const SYM_DEF: u32 = 0x0000_0020;
 pub const SYM_EQ: u32 = 0x0000_0040;
 pub const SYM_LBL: u32 = 0x0000_0080;
 pub const SYM_REG: u32 = 0x0000_0100;
@@ -102,6 +102,8 @@ pub const SYM_SML: u32 = 0x0000_8000;
 pub const SYM_ADJ: u32 = 0x0001_0000;
 pub const SYM_DISC: u32 = 0x0002_0000;
 pub const SYM_LIT: u32 = 0x0004_0000;
+pub const MASK_CONST: u32 = SYM_EQ | SYM_LIT;
+pub const MASK_DEFINED: u32 = SYM_DEF | SYM_LIT;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RelEntry {
@@ -135,8 +137,9 @@ pub enum RefUnknown {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RefType {
     IMM = 1,
-    IMM2 = 2,
-    WORD = 3,
-    JUMP = 4,
-    IMM3 = 5,
+    HWORD = 2,
+    IMM2 = 3,
+    WORD = 4,
+    JUMP = 5,
+    IMM3 = 6,
 }

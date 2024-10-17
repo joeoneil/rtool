@@ -5,7 +5,7 @@ use std::{
     os::unix::fs::OpenOptionsExt,
 };
 
-use super::{mem::Memory, PAGE_SIZE};
+use super::{mem::Memory, SimArgs, EMPTY_ARGS, PAGE_SIZE};
 use crate::{
     common::{Error, Instruction, ObjectModule},
     sim::{Register, DATA_START, STACK_START},
@@ -19,7 +19,7 @@ struct ExecCtx {
     lo: u32,
 }
 
-pub struct Exec {
+pub struct Exec<'a> {
     ctx: ExecCtx,
     mem: Memory,
     heap_start: u32,
@@ -28,6 +28,7 @@ pub struct Exec {
     exn: Option<Exception>,
     files: HashMap<u32, File>,
     next_fd: u32,
+    args: &'a SimArgs,
 }
 
 #[derive(Clone)]
@@ -41,7 +42,7 @@ enum Exception {
     Timer,
 }
 
-impl Clone for Exec {
+impl<'a> Clone for Exec<'a> {
     fn clone(&self) -> Self {
         Exec {
             ctx: self.ctx,
@@ -52,11 +53,12 @@ impl Clone for Exec {
             exn: self.exn.clone(),
             files: HashMap::new(),
             next_fd: 33,
+            args: self.args,
         }
     }
 }
 
-impl Exec {
+impl<'a> Exec<'a> {
     fn exec_instruction(&mut self, i: Instruction) {
         use crate::common::instruction::opcodes::*;
         match i {
@@ -358,15 +360,17 @@ impl Exec {
     }
 
     fn raise_exn(&mut self, exn: Exception) {
-        const MASK: u32 = 0b10000000000000000000000001100010;
-        if self.ctx.reg[Register::K0 as usize] & 1 > 0 {
-            self.ctx.reg[Register::K0 as usize] ^= MASK;
+        if !self.args.no_kern_clobber {
+            const MASK: u32 = 0b10000000000000000000000001100010;
+            if self.ctx.reg[Register::K0 as usize] & 1 > 0 {
+                self.ctx.reg[Register::K0 as usize] ^= MASK;
+            }
+            self.ctx.reg[Register::K0 as usize] >>= 1;
+            if self.ctx.reg[Register::K1 as usize] & 1 > 0 {
+                self.ctx.reg[Register::K1 as usize] ^= MASK;
+            }
+            self.ctx.reg[Register::K1 as usize] >>= 1;
         }
-        self.ctx.reg[Register::K0 as usize] >>= 1;
-        if self.ctx.reg[Register::K1 as usize] & 1 > 0 {
-            self.ctx.reg[Register::K1 as usize] ^= MASK;
-        }
-        self.ctx.reg[Register::K1 as usize] >>= 1;
 
         match exn {
             Exception::Syscall(v) | Exception::Break(v) => self.syscall(v),
@@ -376,15 +380,17 @@ impl Exec {
     }
 
     fn syscall(&mut self, _imm: u32) {
-        match self.ctx.reg[2] {
+        use crate::common::instruction::opcodes::*;
+
+        match self.ctx.reg[Register::V0 as usize] {
             // print_int
-            1 => {
-                print!("{}", self.ctx.reg[4]);
+            SYSCALL_PRINT_INT => {
+                print!("{}", self.ctx.reg[Register::A0 as usize]);
                 std::io::stdout().flush().unwrap();
             }
             // print_string(buf)
-            4 => {
-                let mut a = self.ctx.reg[4];
+            SYSCALL_PRINT_STRING => {
+                let mut a = self.ctx.reg[Register::A0 as usize];
                 match self.read_string(a) {
                     Ok(s) => {
                         print!("{}", s);
@@ -394,28 +400,28 @@ impl Exec {
                 }
             }
             // read_int
-            5 => {
+            SYSCALL_READ_INT => {
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line).unwrap();
                 line = line.chars().take_while(|c| c.is_ascii_digit()).collect();
                 match line.parse::<i32>() {
                     Ok(i) => {
-                        self.ctx.reg[2] = i as u32;
-                        self.ctx.reg[3] = 0;
+                        self.ctx.reg[Register::V0 as usize] = i as u32;
+                        self.ctx.reg[Register::V1 as usize] = 0;
                     }
                     Err(_) => {
-                        self.ctx.reg[3] = 1;
+                        self.ctx.reg[Register::V1 as usize] = 1;
                     }
                 }
             }
             // read_string(buf, len)
-            8 => {
+            SYSCALL_READ_STRING => {
                 let mut line = String::new();
                 std::io::stdin().read_line(&mut line).unwrap();
                 let bytes = line.as_bytes();
-                let mut buf_addr = self.ctx.reg[4];
-                self.ctx.reg[2] = buf_addr;
-                let len = self.ctx.reg[5];
+                let mut buf_addr = self.ctx.reg[Register::A0 as usize];
+                self.ctx.reg[Register::V0 as usize] = buf_addr;
+                let len = self.ctx.reg[Register::A1 as usize];
                 let mut read = 0;
                 for b in bytes[..(len - 1) as usize].iter() {
                     match self.mem.write_byte(buf_addr, *b) {
@@ -434,13 +440,13 @@ impl Exec {
                     Err(e) => self.exn = Some(Exception::Memory(e)),
                 }
                 if read == 0 {
-                    self.ctx.reg[2] = 0;
+                    self.ctx.reg[Register::V0 as usize] = 0;
                 }
             }
             // sbrk(amt)
-            9 => {
-                self.ctx.reg[2] = self.heap_start;
-                if self.ctx.reg[4] != 0 {
+            SYSCALL_SBRK => {
+                self.ctx.reg[Register::V0 as usize] = self.heap_start;
+                if self.ctx.reg[Register::A0 as usize] != 0 {
                     let new_pages = (self.ctx.reg[4] + PAGE_SIZE - 1) / PAGE_SIZE;
                     for _ in 0..new_pages {
                         self.mem.alloc_page(self.heap_next_page, true, false);
@@ -448,35 +454,35 @@ impl Exec {
                     }
                     self.heap_size += new_pages * PAGE_SIZE;
                 }
-                self.ctx.reg[3] = self.heap_size;
+                self.ctx.reg[Register::V1 as usize] = self.heap_size;
             }
             // exit()
-            10 => {
+            SYSCALL_EXIT => {
                 self.exn = Some(Exception::Exit(0));
             }
             // print_char(char)
-            11 => {
-                print!("{}", char::from(self.ctx.reg[4] as u8));
+            SYSCALL_PRINT_CHAR => {
+                print!("{}", char::from(self.ctx.reg[Register::A0 as usize] as u8));
                 std::io::stdout().flush().unwrap();
             }
             // read_char()
-            12 => {
+            SYSCALL_READ_CHAR => {
                 let mut byte = [0u8];
                 std::io::stdin().read_exact(&mut byte);
-                self.ctx.reg[2] = byte[0] as u32;
+                self.ctx.reg[Register::A0 as usize] = byte[0] as u32;
             }
             // open(name, flags, mode)
-            13 => {
+            SYSCALL_OPEN => {
                 let mut opts = std::fs::OpenOptions::new();
-                let name = match self.read_string(self.ctx.reg[4]) {
+                let name = match self.read_string(self.ctx.reg[Register::A0 as usize]) {
                     Ok(s) => s,
                     Err(e) => {
                         self.exn = Some(Exception::Memory(e));
                         return;
                     }
                 };
-                let flags = self.ctx.reg[5];
-                let mode = self.ctx.reg[6];
+                let flags = self.ctx.reg[Register::A1 as usize];
+                let mode = self.ctx.reg[Register::A2 as usize];
                 opts.mode(mode);
                 if flags == 0 {
                     opts.read(true);
@@ -498,28 +504,32 @@ impl Exec {
                 match opts.open(name) {
                     Ok(f) => {
                         self.files.insert(self.next_fd, f);
-                        self.ctx.reg[2] = self.next_fd;
+                        self.ctx.reg[Register::V0 as usize] = self.next_fd;
                         self.next_fd += 1;
                     }
                     Err(e) => {
-                        self.ctx.reg[2] = -1i32 as u32;
+                        self.ctx.reg[Register::V0 as usize] = -1i32 as u32;
                     }
                 }
             }
             // read(fd, buf, len)
-            14 => {
-                if let Some(f) = self.files.get_mut(&self.ctx.reg[4]) {
-                    let mut buf: Vec<u8> = Vec::with_capacity(self.ctx.reg[6] as usize);
+            SYSCALL_READ => {
+                if let Some(f) = self.files.get_mut(&self.ctx.reg[Register::A0 as usize]) {
+                    let mut buf: Vec<u8> =
+                        Vec::with_capacity(self.ctx.reg[Register::A2 as usize] as usize);
                     let read = match f.read(buf.as_mut_slice()) {
                         Ok(amt) => amt,
                         Err(_) => {
-                            self.ctx.reg[2] = -1i32 as u32;
+                            self.ctx.reg[Register::V0 as usize] = -1i32 as u32;
                             return;
                         }
                     };
-                    self.ctx.reg[2] = read as u32;
+                    self.ctx.reg[Register::V0 as usize] = read as u32;
                     for (off, b) in buf.iter().enumerate().take(read) {
-                        match self.mem.write_byte(self.ctx.reg[5] + off as u32, *b) {
+                        match self
+                            .mem
+                            .write_byte(self.ctx.reg[Register::A1 as usize] + off as u32, *b)
+                        {
                             Ok(_) => {}
                             Err(e) => {
                                 self.exn = Some(Exception::Memory(e));
@@ -528,37 +538,46 @@ impl Exec {
                         }
                     }
                 } else {
-                    self.ctx.reg[2] = -1i32 as u32;
+                    self.ctx.reg[Register::V0 as usize] = -1i32 as u32;
                 }
             }
             // write(fd, buf, len)
-            15 => {
-                if let Some(f) = self.files.get_mut(&self.ctx.reg[4]) {
-                    let mut buf: Vec<u8> = Vec::with_capacity(self.ctx.reg[6] as usize);
+            SYSCALL_WRITE => {
+                if let Some(f) = self.files.get_mut(&self.ctx.reg[Register::A0 as usize]) {
+                    let mut buf: Vec<u8> =
+                        Vec::with_capacity(self.ctx.reg[Register::A2 as usize] as usize);
                     for off in 0..self.ctx.reg[6] as usize {
-                        buf.push(match self.mem.read_byte(self.ctx.reg[5] + off as u32) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                self.exn = Some(Exception::Memory(e));
-                                break;
-                            }
-                        })
+                        buf.push(
+                            match self
+                                .mem
+                                .read_byte(self.ctx.reg[Register::A1 as usize] + off as u32)
+                            {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    self.exn = Some(Exception::Memory(e));
+                                    break;
+                                }
+                            },
+                        )
                     }
                     match f.write(buf.as_slice()) {
-                        Ok(amt) => self.ctx.reg[2] = amt as u32,
-                        Err(e) => self.ctx.reg[2] = -1i32 as u32,
+                        Ok(amt) => self.ctx.reg[Register::V0 as usize] = amt as u32,
+                        Err(e) => self.ctx.reg[Register::V0 as usize] = -1i32 as u32,
                     }
                 }
             }
             // close(fd)
-            16 => {
-                if self.files.contains_key(&self.ctx.reg[4]) {
+            SYSCALL_CLOSE => {
+                if self
+                    .files
+                    .contains_key(&self.ctx.reg[Register::A0 as usize])
+                {
                     // causes the file to be dropped, which closes the fd
-                    self.files.remove(&self.ctx.reg[4]);
+                    self.files.remove(&self.ctx.reg[Register::A0 as usize]);
                 }
             }
             // exit2(code)
-            17 => self.exn = Some(Exception::Exit(self.ctx.reg[4])),
+            SYSCALL_EXIT2 => self.exn = Some(Exception::Exit(self.ctx.reg[Register::A0 as usize])),
             _ => unreachable!(),
         }
     }
@@ -591,10 +610,11 @@ impl Exec {
             heap_next_page: 0,
             heap_size: 0,
             heap_start: 0,
+            args: &EMPTY_ARGS,
         }
     }
 
-    pub fn new(module: ObjectModule) -> Option<Self> {
+    pub fn new(module: ObjectModule, args: &'a SimArgs) -> Option<Self> {
         let mut ctx = ExecCtx {
             reg: [0; 32],
             pc: 0,
@@ -610,10 +630,12 @@ impl Exec {
         ctx.reg[Register::FP as usize] = STACK_START;
         ctx.reg[Register::GP as usize] = DATA_START;
 
-        ctx.reg[Register::K0 as usize] = 0x00000000;
-        ctx.reg[Register::K1 as usize] = 0xFFFFFFFF;
+        if !args.no_kern_clobber {
+            ctx.reg[Register::K0 as usize] = 0x00000000;
+            ctx.reg[Register::K1 as usize] = 0xFFFFFFFF;
+        }
 
-        let mem = Memory::new_from_object(module);
+        let mem = Memory::new_from_object(module, args);
 
         println!(
             "Creating new Execution ctx with entrypoint @ 0x{:08x}",
@@ -629,6 +651,7 @@ impl Exec {
             exn: None,
             files: HashMap::new(),
             next_fd: 3,
+            args,
         })
     }
 
@@ -642,7 +665,9 @@ impl Exec {
     pub fn step(&mut self) -> Result<(), Error> {
         let i = self.mem.read_word(self.ctx.pc)?;
         let inst: Instruction = i.try_into()?;
-        eprintln!("pc @ 0x{:08x}: 0x{:08x} -> {}", self.ctx.pc, i, inst);
+        if self.args.trace {
+            eprintln!("pc @ 0x{:08x}: 0x{:08x} -> {}", self.ctx.pc, i, inst);
+        }
         self.exec_instruction(inst);
         match &self.exn {
             Some(e) => {
@@ -677,7 +702,7 @@ impl Exec {
             None => {}
         }
 
-        self.ctx.reg[0] = 0;
+        self.ctx.reg[Register::ZERO as usize] = 0;
         self.ctx.pc += 4;
         Ok(())
     }

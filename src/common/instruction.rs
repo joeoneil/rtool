@@ -68,6 +68,22 @@ pub mod opcodes {
     pub const BCOND_BGEZ: u8 = 0o01;
     pub const BCOND_BLTZAL: u8 = 0o20;
     pub const BCOND_BGEZAL: u8 = 0o21;
+
+    pub const SYSCALL_PRINT_INT: u32 = 1;
+    pub const SYSCALL_PRINT_STRING: u32 = 4;
+    pub const SYSCALL_READ_INT: u32 = 5;
+    pub const SYSCALL_READ_STRING: u32 = 8;
+    pub const SYSCALL_SBRK: u32 = 9;
+    pub const SYSCALL_EXIT: u32 = 10;
+    pub const SYSCALL_PRINT_CHAR: u32 = 11;
+    pub const SYSCALL_READ_CHAR: u32 = 12;
+    pub const SYSCALL_OPEN: u32 = 13;
+    pub const SYSCALL_READ: u32 = 14;
+    pub const SYSCALL_WRITE: u32 = 15;
+    pub const SYSCALL_CLOSE: u32 = 16;
+    pub const SYSCALL_EXIT2: u32 = 17;
+    pub const SYSCALL_SNAP: u32 = 18;
+    pub const SYSCALL_RSNAP: u32 = 19;
 }
 
 /// Extracts a bitfield from a 32-bit number, idx 0 is the highest order bit.

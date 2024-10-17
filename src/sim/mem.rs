@@ -1,4 +1,4 @@
-use super::{DATA_START, PAGE_BITS, PAGE_MASK, PAGE_SIZE, STACK_SIZE, STACK_START, TEXT_START};
+use super::{SimArgs, DATA_START, PAGE_BITS, PAGE_MASK, PAGE_SIZE, STACK_START, TEXT_START};
 use crate::common::Error;
 use crate::sim::ObjectModule;
 
@@ -270,7 +270,7 @@ impl Memory {
         base_addr
     }
 
-    pub fn new_from_object(module: ObjectModule) -> Self {
+    pub fn new_from_object(module: ObjectModule, args: &SimArgs) -> Self {
         let mut s = Self::new();
 
         // Create program memory image
@@ -298,15 +298,24 @@ impl Memory {
             true,
             false,
         );
+        let mut heap_remaining = args.heap_size * 1024;
+        let mut next_heap_addr = heap_start;
+        while heap_remaining > 0 {
+            s.alloc_page(next_heap_addr, true, false);
+            next_heap_addr += PAGE_SIZE;
+            heap_remaining -= PAGE_SIZE;
+        }
 
         // Alloc stack
-        let mut stack_remaining = STACK_SIZE;
+        let mut stack_remaining = args.stack_size * 1024;
         let mut next_stack_addr = STACK_START;
         while stack_remaining > 0 {
             s.alloc_page(next_stack_addr, true, false);
             next_stack_addr -= PAGE_SIZE;
             stack_remaining -= PAGE_SIZE;
         }
+
+        // TODO: Place environment and args onto the stack
 
         s
     }
@@ -324,9 +333,6 @@ impl Memory {
             }
         );
         for (k, v) in kv {
-            if !print_stack && (k.0 << PAGE_BITS) >= (STACK_START - STACK_SIZE) {
-                continue;
-            }
             println!(
                 "0x{:08x} [{}] -> 0x{:08x} [{}]",
                 (k.0 << PAGE_BITS),

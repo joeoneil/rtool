@@ -7,6 +7,7 @@ use std::{
 use lazy_static::lazy_static;
 
 use super::{
+    flags_string,
     types::{ObjectHeader, ObjectModule},
     Location, RefInfo, RefUnknown, SymEntry,
 };
@@ -21,7 +22,7 @@ lazy_static! {
             entry: 0x00000000,
             data: [
                 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-                0x00000000, 0x00000020, 0x00005000,
+                0x00000006, 0x00000020, 0x00005000,
             ]
         },
         text: vec![],
@@ -29,7 +30,68 @@ lazy_static! {
         data: vec![],
         sdata: vec![],
         rel_info: vec![],
-        ext_ref: vec![],
+        ext_ref: vec![
+            RefEntry {
+                addr: 0,
+                str_off: 5,
+                ref_info: RefInfo {
+                    ix: 0,
+                    unknown: RefUnknown::PLUS,
+                    typ: RefType::IMM,
+                    sect: Location::TEXT,
+                }
+            },
+            RefEntry {
+                addr: 0,
+                str_off: 10,
+                ref_info: RefInfo {
+                    ix: 0,
+                    unknown: RefUnknown::PLUS,
+                    typ: RefType::HWORD,
+                    sect: Location::TEXT,
+                }
+            },
+            RefEntry {
+                addr: 0,
+                str_off: 15,
+                ref_info: RefInfo {
+                    ix: 0,
+                    unknown: RefUnknown::PLUS,
+                    typ: RefType::IMM2,
+                    sect: Location::TEXT,
+                }
+            },
+            RefEntry {
+                addr: 0,
+                str_off: 20,
+                ref_info: RefInfo {
+                    ix: 0,
+                    unknown: RefUnknown::PLUS,
+                    typ: RefType::WORD,
+                    sect: Location::TEXT,
+                }
+            },
+            RefEntry {
+                addr: 0,
+                str_off: 25,
+                ref_info: RefInfo {
+                    ix: 0,
+                    unknown: RefUnknown::PLUS,
+                    typ: RefType::JUMP,
+                    sect: Location::TEXT,
+                }
+            },
+            RefEntry {
+                addr: 0,
+                str_off: 30,
+                ref_info: RefInfo {
+                    ix: 0,
+                    unknown: RefUnknown::PLUS,
+                    typ: RefType::IMM3,
+                    sect: Location::TEXT,
+                }
+            },
+        ],
         symtab: (0..0x20)
             .into_iter()
             .map(|i| SymEntry {
@@ -251,44 +313,37 @@ impl ObjectModule {
         })
     }
 
-    fn print_sect(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-        sect: &str,
-        data: &[u8],
-    ) -> std::fmt::Result {
+    pub fn print_sect(&self, sect: &str, data: &[u8]) {
         if data.len() > 0 {
-            write!(f, "sect: {} ({} bytes)\n ", sect, data.len())?;
+            print!("sect: {} ({} bytes)\n ", sect, data.len());
             let mut chunk_counter = 0;
             let mut line_counter = 0;
             for b in data {
-                write!(f, "{:02x}", b)?;
+                print!("{:02x}", b);
                 chunk_counter += 1;
                 if chunk_counter == 4 {
                     chunk_counter = 0;
                     line_counter += 1;
-                    write!(f, " ")?;
+                    print!(" ");
                 }
                 if line_counter == 8 {
                     line_counter = 0;
-                    write!(f, "\n ")?;
+                    print!("\n ");
                 }
             }
             if line_counter != 0 || chunk_counter != 0 {
-                write!(f, "\n")?;
+                print!("\n");
             } else {
-                write!(f, "\r")?;
+                print!("\r");
             }
         }
-        Ok(())
     }
 
-    fn print_rel(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub fn print_rel(&self) {
         if self.rel_info.len() > 0 {
-            writeln!(f, "relocation: {} entries", self.rel_info.len())?;
+            println!("relocation: {} entries", self.rel_info.len());
             for rel in &self.rel_info {
-                writeln!(
-                    f,
+                println!(
                     " rel: addr {:08x} {} {}",
                     rel.addr,
                     // Other sections cannot be relocatable (maybe?)
@@ -303,48 +358,65 @@ impl ObjectModule {
                         RefType::IMM => "IMM",
                         RefType::IMM2 => "IMM2",
                         RefType::IMM3 => "IMM3",
+                        RefType::HWORD => "HWORD",
                         RefType::WORD => "WORD",
                         RefType::JUMP => "JUMP",
+                        _ => panic!(),
                     }
                 );
             }
         }
-
-        Ok(())
     }
 
-    fn print_ref(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub fn print_ref(&self) {
         if self.ext_ref.len() > 0 {
-            writeln!(f, "references: {} entries", self.ext_ref.len())?;
+            println!("references: {} entries", self.ext_ref.len());
             for r in &self.ext_ref {
-                writeln!(
-                    f,
-                    " ref: addr {:08x} sym {:?} ix {:04x} {} + {}",
+                println!(
+                    " ref: addr {:08x} sym {:?} ix {} {} + {}",
                     r.addr,
                     self.get_str_entry(r.str_off as usize)
                         .expect(format!("Invalid reftab entry offset {}", r.str_off).as_str()),
                     r.ref_info.ix,
-                    match r.ref_info.typ {
-                        RefType::IMM => "IMM",
-                        RefType::IMM2 => "IMM2",
-                        RefType::IMM3 => "IMM3",
-                        RefType::JUMP => "JUMP",
-                        RefType::WORD => "WORD",
-                    },
                     match r.ref_info.sect {
                         Location::TEXT => "TEXT",
                         Location::DATA => "DATA",
                         Location::RDATA => "RDATA",
                         Location::SDATA => "SDATA",
                         _ => unreachable!(),
-                    }
-                )?;
+                    },
+                    match r.ref_info.typ {
+                        RefType::IMM => "IMM",
+                        RefType::IMM2 => "IMM2",
+                        RefType::IMM3 => "IMM3",
+                        RefType::JUMP => "JUMP",
+                        RefType::HWORD => "HWORD",
+                        RefType::WORD => "WORD",
+                        _ => panic!(),
+                    },
+                );
             }
         }
-        Ok(())
     }
 
-    fn print_sym(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub fn print_sym(&self) -> std::fmt::Result {
+        if self.symtab.len() > 0 {
+            println!("symbols: {} entries", self.symtab.len());
+            for s in &self.symtab {
+                let loc: Location = ((s.flags & 0xF) as u8).try_into().unwrap();
+                println!(
+                    " sym: {:?} val {:08x} ofid {:04x} flags {:08x}  seg {} S_{} {}",
+                    self.get_str_entry(s.str_off as usize)
+                        .expect(format!("Invalid symtab entry offset {}", s.str_off).as_str()),
+                    s.val,
+                    s.ofid,
+                    s.flags,
+                    loc as u8,
+                    loc,
+                    flags_string(s.flags)
+                );
+            }
+        }
         Ok(())
     }
 
@@ -389,20 +461,6 @@ impl ObjectModule {
     }
 }
 
-impl Display for ObjectModule {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.head)?;
-        self.print_sect(f, "text", self.text.as_slice())?;
-        self.print_sect(f, "rdata", self.rdata.as_slice())?;
-        self.print_sect(f, "data", self.data.as_slice())?;
-        self.print_sect(f, "sdata", self.sdata.as_slice())?;
-        self.print_rel(f)?;
-        self.print_ref(f)?;
-        self.print_sym(f)?;
-        Ok(())
-    }
-}
-
 impl RelEntry {
     pub fn to_bytes(&self) -> [u8; 8] {
         let mut buf = [0; 8];
@@ -444,13 +502,13 @@ impl RefEntry {
             buf[i + 4] = off_bytes[i];
         }
 
-        let ix_bytes = self.ref_info.ix.to_be_bytes();
-        for i in 0..2 {
-            buf[i + 8] = ix_bytes[i];
-        }
+        buf[8] = self.ref_info.sect as u8;
+        buf[9] = ((self.ref_info.unknown as u8) << 4) | (self.ref_info.typ as u8);
 
-        buf[10] = ((self.ref_info.unknown as u8) << 4) | (self.ref_info.typ as u8);
-        buf[11] = self.ref_info.sect as u8;
+        let ix_bytes = self.ref_info.ix.to_le_bytes();
+        for i in 0..2 {
+            buf[i + 10] = ix_bytes[i];
+        }
 
         buf
     }
@@ -458,10 +516,10 @@ impl RefEntry {
     pub fn from_bytes(bytes: [u8; 12]) -> Option<Self> {
         let addr = u32::from_be_bytes(bytes[0..4].try_into().unwrap());
         let str_off = u32::from_be_bytes(bytes[4..8].try_into().unwrap());
-        let ix = u16::from_be_bytes(bytes[8..10].try_into().unwrap());
-        let unknown = RefUnknown::try_from(bytes[10] >> 4).ok()?;
-        let typ = RefType::try_from(bytes[10] & 0x0F).ok()?;
-        let sect = Location::try_from(bytes[11]).ok()?;
+        let sect = Location::try_from(bytes[8]).ok()?;
+        let unknown = RefUnknown::try_from(bytes[9] >> 4).ok()?;
+        let typ = RefType::try_from(bytes[9] & 0xF).ok()?;
+        let ix = u16::from_le_bytes(bytes[10..12].try_into().unwrap());
 
         Some(Self {
             addr,
@@ -573,10 +631,11 @@ impl TryFrom<u8> for RefType {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(Self::IMM),
-            2 => Ok(Self::IMM2),
-            3 => Ok(Self::WORD),
-            4 => Ok(Self::JUMP),
-            5 => Ok(Self::IMM3),
+            2 => Ok(Self::HWORD),
+            3 => Ok(Self::IMM2),
+            4 => Ok(Self::WORD),
+            5 => Ok(Self::JUMP),
+            6 => Ok(Self::IMM3),
             _ => Err(()),
         }
     }
