@@ -11,7 +11,7 @@ use super::{
     types::{ObjectHeader, ObjectModule},
     Location, RefInfo, RefUnknown, SymEntry,
 };
-use crate::common::{RefEntry, RefType, RelEntry};
+use crate::common::{RefEntry, RefType, RelEntry, RelType};
 
 lazy_static! {
     pub static ref obj: ObjectModule = ObjectModule {
@@ -21,19 +21,45 @@ lazy_static! {
             flags: 0x00000000,
             entry: 0x00000000,
             data: [
-                0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-                0x00000006, 0x00000020, 0x00005000,
+                0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000005,
+                0x00000006, 0x00008000, 0x00080000,
             ]
         },
         text: vec![],
         rdata: vec![],
         data: vec![],
         sdata: vec![],
-        rel_info: vec![],
+        rel_info: vec![
+            RelEntry {
+                addr: 0,
+                sect: Location::TEXT,
+                rel_info: RelType::IMM,
+            },
+            RelEntry {
+                addr: 0,
+                sect: Location::TEXT,
+                rel_info: RelType::IMM2,
+            },
+            RelEntry {
+                addr: 0,
+                sect: Location::TEXT,
+                rel_info: RelType::WORD,
+            },
+            RelEntry {
+                addr: 0,
+                sect: Location::TEXT,
+                rel_info: RelType::JUMP,
+            },
+            RelEntry {
+                addr: 0,
+                sect: Location::TEXT,
+                rel_info: RelType::IMM3
+            },
+        ],
         ext_ref: vec![
             RefEntry {
                 addr: 0,
-                str_off: 5,
+                str_off: 0,
                 ref_info: RefInfo {
                     ix: 0,
                     unknown: RefUnknown::PLUS,
@@ -43,7 +69,7 @@ lazy_static! {
             },
             RefEntry {
                 addr: 0,
-                str_off: 10,
+                str_off: 0,
                 ref_info: RefInfo {
                     ix: 0,
                     unknown: RefUnknown::PLUS,
@@ -53,7 +79,7 @@ lazy_static! {
             },
             RefEntry {
                 addr: 0,
-                str_off: 15,
+                str_off: 0,
                 ref_info: RefInfo {
                     ix: 0,
                     unknown: RefUnknown::PLUS,
@@ -63,7 +89,7 @@ lazy_static! {
             },
             RefEntry {
                 addr: 0,
-                str_off: 20,
+                str_off: 0,
                 ref_info: RefInfo {
                     ix: 0,
                     unknown: RefUnknown::PLUS,
@@ -73,7 +99,7 @@ lazy_static! {
             },
             RefEntry {
                 addr: 0,
-                str_off: 25,
+                str_off: 0,
                 ref_info: RefInfo {
                     ix: 0,
                     unknown: RefUnknown::PLUS,
@@ -83,7 +109,7 @@ lazy_static! {
             },
             RefEntry {
                 addr: 0,
-                str_off: 30,
+                str_off: 0,
                 ref_info: RefInfo {
                     ix: 0,
                     unknown: RefUnknown::PLUS,
@@ -92,17 +118,17 @@ lazy_static! {
                 }
             },
         ],
-        symtab: (0..0x20)
+        symtab: (0..0x8000)
             .into_iter()
             .map(|i| SymEntry {
-                flags: 1 << i,
-                str_off: (i * 5),
+                flags: i << 4,
+                str_off: i << 4,
                 val: 0,
                 ofid: 0,
             })
             .collect(),
-        strtab: (0..0x1000)
-            .flat_map(|e| format!("{:04x}", e).bytes().chain([0]).collect::<Vec<_>>())
+        strtab: (0..0x8000)
+            .flat_map(|e| format!("{:015b}", e).bytes().chain([0]).collect::<Vec<_>>())
             .collect(),
     };
 }
@@ -250,6 +276,7 @@ impl ObjectModule {
                 .try_into()
                 .map_err(|_| String::from("Reached end of data while parsing symbol table"))?;
             symtab.push(SymEntry::from_bytes(sym_bytes).expect("Invalid symtab entry"));
+
             /*
             let flags = u32::from_be_bytes(sym_bytes[0..4].try_into().unwrap());
             let val = u32::from_be_bytes(sym_bytes[4..8].try_into().unwrap());
@@ -262,6 +289,7 @@ impl ObjectModule {
                 ofid,
             });
             */
+
             /*
             println!(
                 "raw sym: {:02x}{:02x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x} {:02x}{:02x}{:02x}{:02x}",
@@ -355,12 +383,11 @@ impl ObjectModule {
                         s => panic!("Invalid relocation section {}", s as u8),
                     },
                     match rel.rel_info {
-                        RefType::IMM => "IMM",
-                        RefType::IMM2 => "IMM2",
-                        RefType::IMM3 => "IMM3",
-                        RefType::HWORD => "HWORD",
-                        RefType::WORD => "WORD",
-                        RefType::JUMP => "JUMP",
+                        RelType::IMM => "IMM",
+                        RelType::IMM2 => "IMM2",
+                        RelType::IMM3 => "IMM3",
+                        RelType::WORD => "WORD",
+                        RelType::JUMP => "JUMP",
                         _ => panic!(),
                     }
                 );
@@ -470,7 +497,7 @@ impl RelEntry {
             buf[i] = a_bytes[i];
         }
         buf[4] = self.sect as u8;
-        buf[7] = self.rel_info as u8;
+        buf[5] = self.rel_info as u8;
 
         buf
     }
@@ -478,7 +505,7 @@ impl RelEntry {
     pub fn from_bytes(bytes: [u8; 8]) -> Option<Self> {
         let addr = u32::from_be_bytes(bytes[0..4].try_into().unwrap());
         let sect = bytes[4].try_into().ok()?;
-        let rel_info = bytes[7].try_into().ok()?;
+        let rel_info = bytes[5].try_into().ok()?;
 
         Some(Self {
             addr,
@@ -636,6 +663,21 @@ impl TryFrom<u8> for RefType {
             4 => Ok(Self::WORD),
             5 => Ok(Self::JUMP),
             6 => Ok(Self::IMM3),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<u8> for RelType {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::IMM),
+            2 => Ok(Self::IMM2),
+            3 => Ok(Self::WORD),
+            4 => Ok(Self::JUMP),
+            5 => Ok(Self::IMM3),
             _ => Err(()),
         }
     }

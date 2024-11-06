@@ -79,63 +79,64 @@ pub fn has_all_flags(val: u32, flags: u32) -> bool {
     val & flags == flags
 }
 
-pub fn flag_name(flag: u32) -> &'static str {
-    if flag & SYM_FORW > 0 {
-        "FORW"
-    } else if has_any_flags(flag, SYM_DEF) {
-        "DEF"
-    } else if has_any_flags(flag, SYM_EQ) {
-        "EQ"
-    } else if has_any_flags(flag, SYM_LBL) {
-        "LBL"
-    } else if has_any_flags(flag, SYM_REG) {
-        "REG"
-    } else if has_any_flags(flag, SYM_PRE) {
-        "PRE"
-    } else if has_any_flags(flag, SYM_UNDEF) {
-        "UNDEF"
-    } else if has_any_flags(flag, SYM_XTV) {
-        "XTV"
-    } else if has_any_flags(flag, SYM_MUL) {
-        "MUL"
-    } else if has_any_flags(flag, SYM_RPT) {
-        "RPT"
-    } else if has_any_flags(flag, SYM_GLB) {
-        "GLB"
-    } else if has_any_flags(flag, SYM_SML) {
-        "SML"
-    } else if has_any_flags(flag, SYM_ADJ) {
-        "ADJ"
-    } else if has_any_flags(flag, SYM_DISC) {
-        "DISC"
-    } else if has_any_flags(flag, SYM_LIT) {
-        "LIT"
-    } else {
-        ""
-    }
-}
-
 pub fn flags_string(flags: u32) -> String {
     let mut s = String::new();
-    for i in (4..=18) {
-        if flags & (1 << i) > 0 {
-            s.push_str(flag_name(1 << i));
-            s.push(' ')
-        }
+    if has_all_flags(flags, SYM_FORW) {
+        s.push_str("FORW ");
     }
-    if has_all_flags(flags, SYM_EQ | SYM_LIT) {
-        s.push_str("CONST");
-        s.push(' ');
+    if has_all_flags(flags, SYM_DEF) {
+        s.push_str("DEF ");
+    }
+    if has_all_flags(flags, SYM_EQ) {
+        s.push_str("EQ ");
+    }
+    if has_all_flags(flags, SYM_LBL) {
+        s.push_str("LBL ");
+    }
+    if has_all_flags(flags, SYM_REG) {
+        s.push_str("REG ");
+    }
+    if has_all_flags(flags, SYM_PRE) {
+        s.push_str("PRE ");
+    }
+    if has_all_flags(flags, SYM_XTV) {
+        s.push_str("XTV ");
+    }
+    if has_all_flags(flags, SYM_MUL) {
+        s.push_str("MUL ");
+    }
+    if has_all_flags(flags, SYM_RPT) {
+        s.push_str("RPT ");
+    }
+    if has_all_flags(flags, SYM_GLB) {
+        s.push_str("GLB ");
+    }
+    if has_all_flags(flags, SYM_SML) {
+        s.push_str("SML ");
+    }
+    if has_all_flags(flags, SYM_ADJ) {
+        s.push_str("ADJ ");
+    }
+    if has_all_flags(flags, SYM_DISC) {
+        s.push_str("DISC ");
+    }
+    if has_all_flags(flags, SYM_LIT) {
+        s.push_str("LIT ");
     }
     if !has_any_flags(flags, SYM_DEF | SYM_LIT) {
-        if !has_any_flags(flags, SYM_UNDEF) {
-            s.push_str("UNDEF");
-            s.push(' ');
-        }
-        if has_any_flags(flags, SYM_GLB) {
-            s.push_str("EXTERN");
-            s.push(' ');
-        }
+        s.push_str("UNDEF ");
+    }
+    if has_all_flags(flags, SYM_DEF) {
+        s.push_str("RELOC ");
+    }
+    if has_all_flags(flags, SYM_GLB) && !has_any_flags(flags, SYM_DEF) {
+        s.push_str("EXTERN ");
+    }
+    if has_all_flags(flags, SYM_BASE) {
+        s.push_str("BASE ");
+    }
+    if s.len() > 0 {
+        s.pop();
     }
     s
 }

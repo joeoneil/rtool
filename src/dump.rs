@@ -48,8 +48,18 @@ pub fn dump(args: &DumpArgs) {
         .map(|v| ObjectModule::from_slice_u8(v.as_slice()).expect("Failed to parse object module"))
         .collect::<Vec<_>>();
 
-    for om in oms {
-        println!("{}", om.head);
+    println!("");
+    for i in 0..oms.len() {
+        let om = &oms[i];
+        let f = &args.files[i];
+        println!(
+            "File:  {}",
+            std::path::Path::new(f)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+        );
+        print!("{}", om.head);
         if all || args.text {
             om.print_sect("text", om.text.as_slice());
         }
