@@ -274,6 +274,9 @@ impl Memory {
         let mut s = Self::new();
 
         // Create program memory image
+        // FIXME: Sections should not alloc'd on page boundaries
+        // This will only work for programs that only use 1 of the data
+        // sections. 
         s.alloc_data(TEXT_START, module.text.as_slice(), false, true);
         let data_start = s.alloc_data(DATA_START, module.rdata.as_slice(), false, false);
         let sdata_start = s.alloc_data(data_start, module.data.as_slice(), true, false);

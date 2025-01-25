@@ -81,5 +81,6 @@ pub fn dump(args: &DumpArgs) {
         if all || args.symtab {
             om.print_sym();
         }
+        // om.print_disassembly();
     }
 }

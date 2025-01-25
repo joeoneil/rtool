@@ -11,7 +11,7 @@ use super::{
     types::{ObjectHeader, ObjectModule},
     Location, RefInfo, RefUnknown, SymEntry,
 };
-use crate::common::{RefEntry, RefType, RelEntry, RelType};
+use crate::common::{RefEntry, RefType, RelEntry, RelType, Instruction};
 
 lazy_static! {
     pub static ref obj: ObjectModule = ObjectModule {
@@ -443,6 +443,16 @@ impl ObjectModule {
                     flags_string(s.flags)
                 );
             }
+        }
+        Ok(())
+    }
+
+    pub fn print_disassembly(&self) -> std::fmt::Result {
+        println!("Disassembly:");
+        for idx in 0..self.text.len() / 4 {
+            let i_bytes = u32::from_be_bytes(self.text[idx * 4..idx * 4 + 4].try_into().unwrap());
+            let inst: Instruction = i_bytes.try_into().unwrap(); // remove this unwrap
+            println!("\t{:04x} {}", idx * 4, inst);
         }
         Ok(())
     }
