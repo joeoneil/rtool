@@ -45,32 +45,32 @@ lazy_static! {
         rel_info: vec![],
         ext_ref: vec![
             RefEntry {
-                addr: 0x0000000c,
-                str_off: 0x00000000,
+                addr: 0x00000010,
+                str_off: 0x00000033,
                 ref_info: RefInfo {
                     ix: 0x0000,
                     unknown: RefUnknown::PLUS,
-                    typ: RefType::WORD,
+                    typ: RefType::IMM2,
                     sect: Location::TEXT,
                 }
             },
             RefEntry {
                 addr: 0x00000018,
-                str_off: 0x00000000,
+                str_off: 0x00000005,
                 ref_info: RefInfo {
                     ix: 0x0000,
                     unknown: RefUnknown::PLUS,
-                    typ: RefType::WORD,
+                    typ: RefType::IMM2,
                     sect: Location::TEXT,
                 }
             },
             RefEntry {
-                addr: 0x00000030,
+                addr: 0x0000002c,
                 str_off: 0x00000000,
                 ref_info: RefInfo {
                     ix: 0x0000,
                     unknown: RefUnknown::PLUS,
-                    typ: RefType::IMM3,
+                    typ: RefType::JUMP,
                     sect: Location::TEXT,
                 }
             }
