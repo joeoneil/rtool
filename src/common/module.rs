@@ -9,9 +9,9 @@ use lazy_static::lazy_static;
 use super::{
     flags_string,
     types::{ObjectHeader, ObjectModule},
-    Location, RefInfo, RefUnknown, SymEntry,
+    Location, RefInfo, RefUnknown, SymEntry, SYM_DEF, SYM_LBL,
 };
-use crate::common::{RefEntry, RefType, RelEntry, RelType, Instruction};
+use crate::common::{Instruction, RefEntry, RefType, RelEntry, RelType};
 
 lazy_static! {
     pub static ref obj: ObjectModule = ObjectModule {
@@ -452,7 +452,19 @@ impl ObjectModule {
         for idx in 0..self.text.len() / 4 {
             let i_bytes = u32::from_be_bytes(self.text[idx * 4..idx * 4 + 4].try_into().unwrap());
             let inst: Instruction = i_bytes.try_into().unwrap(); // remove this unwrap
-            println!("\t{:04x} {}", idx * 4, inst);
+            if let Some(sym) = self.label_lookup((idx * 4) as u32) {
+                println!(
+                    "\t{:24}{:08x} {:04x} {}",
+                    self.get_str_entry(sym.str_off as usize)
+                        .unwrap()
+                        .to_string_lossy(),
+                    i_bytes,
+                    idx * 4,
+                    inst
+                )
+            } else {
+                println!("\t{:24}{:08x} {:04x} {}", "", i_bytes, idx * 4, inst);
+            }
         }
         Ok(())
     }
@@ -475,6 +487,18 @@ impl ObjectModule {
             .copied()
             .collect::<Vec<_>>();
         CString::new(buf).ok()
+    }
+
+    pub fn label_lookup(&self, text_offset: u32) -> Option<SymEntry> {
+        self.symtab
+            .iter()
+            .find(|s| {
+                s.flags & 0xF == Location::TEXT as u32
+                    && s.flags & SYM_LBL > 0
+                    && s.flags & SYM_DEF > 0
+                    && s.val == text_offset + if self.head.entry > 0 { 0x400000 } else { 0 }
+            })
+            .copied()
     }
 
     pub fn to_vec_u8(self) -> Vec<u8> {

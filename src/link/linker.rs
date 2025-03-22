@@ -1,11 +1,10 @@
-
 use std::collections::HashMap;
 use std::ffi::CString;
 
 use itertools::Itertools;
 
 use crate::common::Location;
-use crate::link::{ObjectModule, ObjectHeader, LinkerArgs};
+use crate::link::{LinkerArgs, ObjectHeader, ObjectModule};
 
 #[derive(Copy, Clone, Debug)]
 struct OMLinkInfo {
@@ -14,7 +13,6 @@ struct OMLinkInfo {
 }
 
 pub fn link(obj: Vec<ObjectModule>, args: &LinkerArgs) -> ObjectModule {
-    
     let mut info = OMLinkInfo {
         ofid: 0,
         sect_off: [0; 10],
@@ -28,10 +26,14 @@ pub fn link(obj: Vec<ObjectModule>, args: &LinkerArgs) -> ObjectModule {
         Location::SBSS,
         Location::BSS,
         Location::STR,
-    ].into_iter().map(|l| l as usize).collect::<Vec<_>>();
+    ]
+    .into_iter()
+    .map(|l| l as usize)
+    .collect::<Vec<_>>();
 
     // associate each object with section offsets (binary sections only)
-    let obj = obj.into_iter()
+    let obj = obj
+        .into_iter()
         .map(|o| {
             let out = (o.clone(), info.clone());
             info.ofid += 1;
@@ -46,12 +48,13 @@ pub fn link(obj: Vec<ObjectModule>, args: &LinkerArgs) -> ObjectModule {
                 }
             }
             out
-        }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
     for (_, info) in &obj {
         println!("{}: {:?}", info.ofid, info);
     }
-    
+
     let mut out = ObjectModule {
         head: ObjectHeader {
             magic: 0xface,
@@ -69,7 +72,7 @@ pub fn link(obj: Vec<ObjectModule>, args: &LinkerArgs) -> ObjectModule {
         symtab: vec![],
         strtab: vec![0; info.sect_off[Location::STR as usize] as usize],
     };
-    
+
     // actually concatenate binary sections
     for (om, info) in &obj {
         for idx in 0..om.text.len() {
@@ -91,15 +94,11 @@ pub fn link(obj: Vec<ObjectModule>, args: &LinkerArgs) -> ObjectModule {
 
     let string_map = string_dedup(&mut out);
 
-    fn map_string(idx: u32) -> u32 {
-        string_map.get(&idx).expect("panic: failed get string idx");
-    }
+    let map_string = |idx| -> u32 { *string_map.get(&idx).expect("panic: failed get string idx") };
 
-    fn map_string_ofid(ofid: usize, idx: u32) -> u32 {
-        map_string(obj[ofid].1.sect_off[Location::STR as usize])
-    }
-
-    
+    let map_string_ofid = |ofid: usize, idx: u32| -> u32 {
+        map_string(obj[ofid].1.sect_off[Location::STR as usize] + idx)
+    };
 
     todo!();
 }
@@ -130,8 +129,11 @@ fn string_dedup(obj: &mut ObjectModule) -> HashMap<u32, u32> {
     let mut addr_map: HashMap<u32, u32> = HashMap::new();
 
     let mut new_bytes = vec![];
-    
-    for (addr, s) in addr_str.into_iter().sorted_by(|(a1, _), (a2, _)| a1.cmp(a2)) {
+
+    for (addr, s) in addr_str
+        .into_iter()
+        .sorted_by(|(a1, _), (a2, _)| a1.cmp(a2))
+    {
         if let Some(mapped_addr) = str_addr.get(&s) {
             addr_map.insert(addr, *mapped_addr);
         } else {
@@ -147,22 +149,3 @@ fn string_dedup(obj: &mut ObjectModule) -> HashMap<u32, u32> {
 
     addr_map
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

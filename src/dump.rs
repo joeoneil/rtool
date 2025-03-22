@@ -28,6 +28,8 @@ pub struct DumpArgs {
     text: bool,
     #[arg(short = 'y', help = "Dump the contents of the symbol table")]
     symtab: bool,
+    #[arg(short = 'i', help = "Dump the instructions")]
+    instruction: bool,
     files: Vec<String>,
 }
 
@@ -40,7 +42,8 @@ pub fn dump(args: &DumpArgs) {
         || args.rdata
         || args.sdata
         || args.text
-        || args.symtab);
+        || args.symtab
+        || args.instruction);
     let oms = args
         .files
         .iter()
@@ -51,36 +54,40 @@ pub fn dump(args: &DumpArgs) {
     println!("");
     for i in 0..oms.len() {
         let om = &oms[i];
-        let f = &args.files[i];
-        println!(
-            "File:  {}",
-            std::path::Path::new(f)
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-        );
-        print!("{}", om.head);
-        if all || args.text {
-            om.print_sect("text", om.text.as_slice());
+        if (args.instruction) {
+            om.print_disassembly();
+        } else {
+            let f = &args.files[i];
+            println!(
+                "File:  {}",
+                std::path::Path::new(f)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+            );
+            print!("{}", om.head);
+            if all || args.text {
+                om.print_sect("text", om.text.as_slice());
+            }
+            if all || args.rdata {
+                om.print_sect("rdata", om.rdata.as_slice());
+            }
+            if all || args.data {
+                om.print_sect("data", om.data.as_slice());
+            }
+            if all || args.sdata {
+                om.print_sect("sdata", om.sdata.as_slice());
+            }
+            if all || args.relocation {
+                om.print_rel();
+            }
+            if all || args.reference {
+                om.print_ref();
+            }
+            if all || args.symtab {
+                om.print_sym();
+            }
+            // om.print_disassembly();
         }
-        if all || args.rdata {
-            om.print_sect("rdata", om.rdata.as_slice());
-        }
-        if all || args.data {
-            om.print_sect("data", om.data.as_slice());
-        }
-        if all || args.sdata {
-            om.print_sect("sdata", om.sdata.as_slice());
-        }
-        if all || args.relocation {
-            om.print_rel();
-        }
-        if all || args.reference {
-            om.print_ref();
-        }
-        if all || args.symtab {
-            om.print_sym();
-        }
-        // om.print_disassembly();
     }
 }

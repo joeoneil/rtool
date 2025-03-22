@@ -26,7 +26,8 @@ enum Commands {
 fn main() {
     fs::write(
         "./dump.obj",
-        rtool::common::module::obj.clone().to_vec_u8().as_slice(),
+        // rtool::common::module::obj.clone().to_vec_u8().as_slice(),
+        rtool::link::r2k_startup_obj.clone().to_vec_u8().as_slice(),
     )
     .unwrap();
 
